@@ -1,0 +1,10 @@
+{
+    "trading_pair": "BTC-USD-PERP",
+    "balance_usage_percentage": [1, 5],
+    "leverage": 20,
+    "delay_between_trades_seconds": [30, 60],
+    "delay_between_buy_sell_seconds": [5, 15],
+    "delay_between_groups_seconds": [10, 20],
+    "delay_between_cycles_seconds": [60, 120],
+    "cycles_per_account": [5, 10]
+  }
