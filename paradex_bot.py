@@ -67,7 +67,7 @@ def load_user_agents():
         return []
 
 # --- Асинхронные функции для API Paradex (с повторными попытками) ---
-async def get_jwt_token(session, account_data, paradex_config): # Добавили paradex_config
+async def get_jwt_token(session, account_data, paradex_config):
     """Получает JWT токен для аккаунта с повторными попытками."""
     api_url = "https://api.testnet.paradex.trade/v1/auth"
     headers = {
@@ -85,14 +85,21 @@ async def get_jwt_token(session, account_data, paradex_config): # Добавил
     while True:
         try:
             async with session.post(api_url, headers=headers, proxy=account_data['proxy']) as response:
+                print(f"Аккаунт {account_data['account_index']}: Запрос JWT, статус ответа: {response.status}") # Лог статуса ответа
                 response.raise_for_status()
-                auth_response = await response.json()
-                jwt_token = auth_response.get('jwt_token')
+
+                raw_response_text = await response.text() # <----- Получаем сырой текст ответа
+                print(f"Аккаунт {account_data['account_index']}: Raw JWT Response Text: {raw_response_text}") # <----- Лог сырого текста ответа
+
+                jwt_response_json = await response.json() # Разбираем JSON
+                print(f"Аккаунт {account_data['account_index']}: Parsed JWT Response JSON: {jwt_response_json}") # <----- Лог разобранного JSON
+
+                jwt_token = jwt_response_json.get('jwt_token')
                 if jwt_token:
                     print(f"Аккаунт {account_data['account_index']}: JWT токен успешно получен.")
                     return jwt_token
                 else:
-                    print(f"Аккаунт {account_data['account_index']}: Ошибка получения JWT токена, токен не найден в ответе. Ответ API: {auth_response}")
+                    print(f"Аккаунт {account_data['account_index']}: Ошибка получения JWT токена, токен не найден в ответе. Ответ API: {jwt_response_json}")
         except aiohttp.ClientError as e:
             print(f"Аккаунт {account_data['account_index']}: Ошибка API при запросе JWT токена: {e}. Повторная попытка через {retry_delay_seconds} секунд...")
         except Exception as e:
