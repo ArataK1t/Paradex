@@ -90,7 +90,7 @@ async def get_jwt_token(session, account_data, paradex_config):
         account_data['private_key'],
         paradex_config
     )
-    headers['PARADEX-STARKNET-SIGNATURE'] = ','.join(signature_parts)
+    headers['PARADEX-STARKNET-SIGNATURE'] = json.dumps(generate_starknet_auth_signature(...))
     
     retry_delay_seconds = 5
     while True:
