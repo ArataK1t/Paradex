@@ -279,7 +279,7 @@ async def trade_cycle(account_data, config, paradex_config): # Добавили 
 
 async def get_paradex_config(paradex_http_url):
     """Загружает конфигурацию Paradex API."""
-    url = paradex_http_url + '/config'
+    url = paradex_http_url + '/system/config'
     async with aiohttp.ClientSession() as session:
         async with session.get(url) as response:
             print(f"Запрос config, статус ответа: {response.status}") # <--- Добавлено логирование статуса
