@@ -68,40 +68,37 @@ def load_user_agents():
 
 # --- Асинхронные функции для API Paradex (с повторными попытками) ---
 async def get_jwt_token(session, account_data, paradex_config):
-    """Получает JWT токен для аккаунта с повторными попытками."""
     api_url = "https://api.testnet.paradex.trade/v1/auth"
+    current_time = int(time.time())
+    expiration_time = current_time + 1800
     headers = {
         'Accept': 'application/json',
         'PARADEX-STARKNET-ACCOUNT': account_data['address'],
-        'PARADEX-TIMESTAMP': str(int(time.time())),
-        'PARADEX-SIGNATURE-EXPIRATION': str(int(time.time() + 1800))
+        'PARADEX-TIMESTAMP': str(current_time),
+        'PARADEX-SIGNATURE-EXPIRATION': str(expiration_time)
     }
-    # Получаем подпись как список
+    
+    # Получаем подпись как список и объединяем её в строку
     signature_parts = generate_starknet_auth_signature(
-            account_data['address'],
-            headers['PARADEX-TIMESTAMP'],
-            headers['PARADEX-SIGNATURE-EXPIRATION'],
-            account_data['private_key'],
-            paradex_config
+        account_data['address'],
+        current_time,
+        expiration_time,
+        account_data['private_key'],
+        paradex_config
     )
-    # Объединяем части в одну строку:
     headers['PARADEX-STARKNET-SIGNATURE'] = ','.join(signature_parts)
-
-
+    
     retry_delay_seconds = 5
 
     while True:
         try:
             async with session.post(api_url, headers=headers, proxy=account_data['proxy']) as response:
-                print(f"Аккаунт {account_data['account_index']}: Запрос JWT, статус ответа: {response.status}") # Лог статуса ответа
+                print(f"Аккаунт {account_data['account_index']}: Запрос JWT, статус ответа: {response.status}")
                 response.raise_for_status()
-
-                raw_response_text = await response.text() # <----- Получаем сырой текст ответа
-                print(f"Аккаунт {account_data['account_index']}: Raw JWT Response Text: {raw_response_text}") # <----- Лог сырого текста ответа
-
-                jwt_response_json = await response.json() # Разбираем JSON
-                print(f"Аккаунт {account_data['account_index']}: Parsed JWT Response JSON: {jwt_response_json}") # <----- Лог разобранного JSON
-
+                raw_response_text = await response.text()
+                print(f"Аккаунт {account_data['account_index']}: Raw JWT Response Text: {raw_response_text}")
+                jwt_response_json = await response.json()
+                print(f"Аккаунт {account_data['account_index']}: Parsed JWT Response JSON: {jwt_response_json}")
                 jwt_token = jwt_response_json.get('jwt_token')
                 if jwt_token:
                     print(f"Аккаунт {account_data['account_index']}: JWT токен успешно получен.")
