@@ -1,16 +1,11 @@
 from starknet_py.common import int_from_bytes
 from starknet_py.utils.typed_data import TypedData
 from starknet_py.constants import EC_ORDER  # Если такая константа доступна в вашей версии
-from starknet_crypto_py import generate_k_rfc6979, sign as rs_sign
+from starknet_crypto_py import sign as rs_sign
 
-
-# Предполагаем, что у вас есть функция message_signature, например:
 def message_signature(msg_hash: int, priv_key: int) -> tuple[int, int]:
-    # Здесь можно использовать вашу реализацию, например, с использованием generate_k_rfc6979
-    # и rs_sign из starknet_crypto_py
-    from starknet_crypto_py import sign as rs_sign, generate_k_rfc6979
-    k = generate_k_rfc6979(msg_hash, priv_key)
-    return rs_sign(private_key=priv_key, msg_hash=msg_hash, k=k)
+    return rs_sign(private_key=priv_key, msg_hash=msg_hash)
+
 
 def generate_starknet_auth_signature(account_address: str, timestamp: int, expiration: int, private_key_hex: str, paradex_config: dict) -> list[str]:
     """
