@@ -355,16 +355,34 @@ async def main():
         random.shuffle(account_data_list) # Шаффлим аккаунты перед каждым циклом (можно вернуть, если нужно)
 
         account_groups = []
-        group = []
-        group_size_options = [2, 3]
+        account_index = 0
+        num_accounts = len(account_data_list)
 
-        for account_data in account_data_list:
-            group.append(account_data)
-            if len(group) == random.choice(group_size_options):
-                account_groups.append(list(group))
-                group = []
-        if group:
-            account_groups.append(list(group))
+        num_triplets = num_accounts // 3
+        remainder = num_accounts % 3
+        num_pairs = 0
+
+        if remainder == 1:
+            num_triplets -= 1
+            num_pairs += 2
+        elif remainder == 2:
+            num_pairs += 1
+
+        print(f"Формируем {num_triplets} групп по 3 аккаунта и {num_pairs} групп по 2 аккаунта.") # Логгируем план
+
+        # Формируем группы по 3 аккаунта
+        for _ in range(num_triplets):
+            group = account_data_list[account_index:account_index + 3]
+            account_groups.append(group)
+            account_index += 3
+            print(f"  Группа размера: {len(group)}") # Логгируем размер группы
+
+        # Формируем группы по 2 аккаунта
+        for _ in range(num_pairs):
+            group = account_data_list[account_index:account_index + 2]
+            account_groups.append(group)
+            account_index += 2
+            print(f"  Группа размера: {len(group)}") # Логгируем размер группы
 
         print(f"Сформировано групп: {len(account_groups)}")
 
@@ -380,7 +398,7 @@ async def main():
                 group[1]['order_side'] = "SELL"
                 group[2]['order_side'] = "SHORT_HALF" # Изменено на SHORT_HALF для третьего аккаунта в тройке
             else:
-                print("Ошибка: Некорректный размер группы!")
+                print("Ошибка: Некорректный размер группы!") # Эта ошибка больше не должна возникать
                 continue
 
             tasks = []
@@ -399,7 +417,6 @@ async def main():
             # --- КОНЕЦ Задержки МЕЖДУ ГРУППАМИ ---
 
         print(f"\n--- Цикл #{cycle_number + 1} завершен для всех групп. ---\n")
-
 
     print("Все торговые циклы завершены.")
 

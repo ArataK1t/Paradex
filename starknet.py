@@ -4,7 +4,9 @@ from starknet_py.constants import EC_ORDER  # Если такая констан
 from starknet_crypto_py import sign as rs_sign
 
 def message_signature(msg_hash: int, priv_key: int) -> tuple[int, int]:
-    return rs_sign(private_key=priv_key, msg_hash=msg_hash)
+    import random # Импортируем random здесь, если еще не импортирован
+    k = random.randint(1, EC_ORDER - 1) # <---- Генерируем случайное k
+    return rs_sign(private_key=priv_key, msg_hash=msg_hash, k=k) # <---- Передаем k
 
 
 def generate_starknet_auth_signature(account_address: str, timestamp: int, expiration: int, private_key_hex: str, paradex_config: dict) -> list[str]:
