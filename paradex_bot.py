@@ -277,12 +277,20 @@ async def trade_cycle(account_data, config, paradex_config): # Добавили 
         print(f"Торговый цикл для аккаунта {account_data['address']} завершен.\n")
 
 
-async def get_paradex_config(paradex_http_url): # Функция для загрузки paradex_config из API
+async def get_paradex_config(paradex_http_url):
     """Загружает конфигурацию Paradex API."""
     url = paradex_http_url + '/config'
     async with aiohttp.ClientSession() as session:
         async with session.get(url) as response:
-            response.raise_for_status()
+            print(f"Запрос config, статус ответа: {response.status}") # <--- Добавлено логирование статуса
+            try:
+                response.raise_for_status() # Сначала проверяем на ошибки HTTP
+            except aiohttp.ClientResponseError as e:
+                print(f"Ошибка при загрузке paradex_config: HTTP статус {response.status}, текст ошибки: {e}")
+                return None # Возвращаем None в случае ошибки загрузки конфига
+            except Exception as e: # Ловим другие возможные исключения
+                print(f"Непредвиденная ошибка при загрузке paradex_config: {e}")
+                return None
             return await response.json()
 
 
