@@ -82,7 +82,7 @@ async def get_jwt_token(session, account_data, paradex_config):
         'PARADEX-TIMESTAMP': str(current_time),
         'PARADEX-SIGNATURE-EXPIRATION': str(expiration_time)
     }
-    # Получаем подпись как список и объединяем её в строку
+    # Получаем подпись как список
     signature_parts = generate_starknet_auth_signature(
         account_data['address'],
         current_time,
@@ -90,7 +90,8 @@ async def get_jwt_token(session, account_data, paradex_config):
         account_data['private_key'],
         paradex_config
     )
-    headers['PARADEX-STARKNET-SIGNATURE'] = json.dumps(generate_starknet_auth_signature(...))
+    # Преобразуем список в корректную JSON-строку
+    headers['PARADEX-STARKNET-SIGNATURE'] = json.dumps(signature_parts)
     
     retry_delay_seconds = 5
     while True:
