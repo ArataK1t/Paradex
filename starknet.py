@@ -2,6 +2,7 @@ from starknet_py.common import int_from_bytes
 from starknet_py.utils.typed_data import TypedData
 from starknet_py.constants import EC_ORDER  # Если такая константа доступна в вашей версии
 from starknet_crypto_py import sign as rs_sign
+import json
 
 def message_signature(msg_hash: int, priv_key: int) -> tuple[int, int]:
     import random # Импортируем random здесь, если еще не импортирован
@@ -61,6 +62,7 @@ def generate_starknet_auth_signature(account_address: str, timestamp: int, expir
 def generate_starknet_order_signature(order_params: dict, private_key_hex: str, paradex_config: dict) -> list[str]:
     """
     Генерирует подпись для ордера согласно документации Paradex.
+    ... (описание функции) ...
     """
     chain_id = int_from_bytes(paradex_config["starknet_chain_id"].encode())
 
@@ -83,12 +85,14 @@ def generate_starknet_order_signature(order_params: dict, private_key_hex: str, 
             ],
         },
         "message": {
-            "timestamp": int(order_params['signature_timestamp']),  # 🟢 Приведение к int
-            "market": int.from_bytes(order_params['market'].encode(), "big"),  # 🟢 Преобразуем строку в felt
-            "side": 1 if order_params['side'] == "BUY" else 2,  # 🟢 Приведение к числу
-            "orderType": int.from_bytes(order_params['type'].encode(), "big"),  # 🟢 Преобразуем строку в felt
-            "size": int(float(order_params['size'])),  # 🟢 Приведение к int
-            "price": int(float(order_params.get('price', 0))),  # 🟢 Приведение к int
+            "timestamp": int(order_params['signature_timestamp']),
+            # При необходимости можно преобразовать строку в felt (например, используя encode_shortstring)
+            "market": order_params['market'],
+            # Преобразуем сторону в строковое представление: "1" для BUY, "2" для SELL
+            "side": "1" if order_params['side'] == "BUY" else "2",
+            "orderType": order_params['type'],
+            "size": int(float(order_params['size'])),
+            "price": int(float(order_params.get('price', 0))),
         },
     }
 
@@ -96,6 +100,8 @@ def generate_starknet_order_signature(order_params: dict, private_key_hex: str, 
     account_int = int(order_params['account_address'], 16)
     msg_hash = typed_data.message_hash(account_int)
 
-    priv_key = int(private_key_hex, 16)
-    r, s = message_signature(msg_hash, priv_key)
+    print(f"TypedData для ордера (JSON):\n{json.dumps(order_msg, indent=2)}") # <---- ДОБАВЛЕН ЛОГ TypedData
+    print(f"Message Hash для ордера: {msg_hash}") # <---- ДОБАВЛЕН ЛОГ Message Hash
+
+    r, s = message_signature(msg_hash, int(private_key_hex, 16))
     return [str(r), str(s)]
