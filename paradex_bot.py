@@ -4,29 +4,15 @@ import asyncio
 import json
 import time
 import random
-import os
-import logging
-from typing import Dict, Tuple, List
 
-# --- Импорт функций StarkNet подписи из файлов helpers (скопируйте их в ту же директорию) ---
-from helpers.account import Account
-from helpers.auth import build_auth_message, build_order_message
-from utils import get_chain_id, hex_to_int
-from starknet_py.net.full_node_client import FullNodeClient
-from starknet_py.net.signer.stark_curve_signer import KeyPair
-from starknet_py.common import int_from_bytes
-from starknet_py.utils.typed_data import TypedData
-from starknet_crypto_py import sign as rs_sign
-from starknet_py.constants import EC_ORDER
-
+# --- Импорт функций StarkNet подписи из файла (см. ниже) ---
+from starknet import generate_starknet_auth_signature, generate_starknet_order_signature
 
 # --- Конфигурация и Данные ---
 CONFIG_FILE = "config.json"
 WALLET_FILE = "wallets.json"
 PROXY_FILE = "proxies.txt"
 USER_AGENT_FILE = "user_agents.txt"  # Файл с User-Agent
-
-paradex_http_url = "https://api.testnet.paradex.trade/v1" # URL API Paradex
 
 # --- Загрузка данных из файлов ---
 def load_config():
@@ -85,45 +71,28 @@ def load_user_agents():
         print(f"Ошибка: Файл User-Agent '{USER_AGENT_FILE}' не найден.")
         return []
 
-async def get_paradex_config_from_api():
-    """Загружает конфигурацию Paradex API."""
-    url = paradex_http_url + '/system/config'
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url) as response:
-            print(f"Запрос config, статус ответа: {response.status}")
-            try:
-                response.raise_for_status()
-            except aiohttp.ClientResponseError as e:
-                print(f"Ошибка при загрузке paradex_config: HTTP статус {response.status}, текст ошибки: {e}")
-                return None
-            except Exception as e:
-                print(f"Непредвиденная ошибка при загрузке paradex_config: {e}")
-                return None
-            return await response.json()
-
-# --- Асинхронные функции для API Paradex (с повторными попытками), ИСПОЛЬЗУЮТ HELPERS ФАЙЛЫ ДЛЯ ПОДПИСИ ---
+# --- Асинхронные функции для API Paradex (с повторными попытками) ---
 async def get_jwt_token(session, account_data, paradex_config):
-    api_url = paradex_http_url + "/auth"
-    chain_id_int = get_chain_id(paradex_config["starknet_chain_id"])
-    account = Account( # Используем класс Account из helpers/account.py
-        client=FullNodeClient(node_url=paradex_config["starknet_fullnode_rpc_url"]),
-        address=account_data['address'],
-        key_pair=KeyPair.from_private_key(key=hex_to_int(account_data['private_key'])),
-        chain=chain_id_int,
-    )
-
-    now = int(time.time())
-    expiry = now + 1800
-    message = build_auth_message(chain_id_int.value, now, expiry) # Используем build_auth_message из helpers/auth.py
-    sig = account.sign_message(message) # Используем Account.sign_message для подписи
-
-    headers: Dict = {
-        "PARADEX-STARKNET-ACCOUNT": account_data['address'],
-        "PARADEX-STARKNET-SIGNATURE": f'["{sig[0]}","{sig[1]}"]', # Формат подписи как в примере GitHub
-        "PARADEX-TIMESTAMP": str(now),
-        "PARADEX-SIGNATURE-EXPIRATION": str(expiry),
+    api_url = "https://api.testnet.paradex.trade/v1/auth"
+    current_time = int(time.time())
+    expiration_time = current_time + 1800
+    headers = {
+        'Accept': 'application/json',
+        'PARADEX-STARKNET-ACCOUNT': account_data['address'],
+        'PARADEX-TIMESTAMP': str(current_time),
+        'PARADEX-SIGNATURE-EXPIRATION': str(expiration_time)
     }
-
+    # Получаем подпись как список
+    signature_parts = generate_starknet_auth_signature(
+        account_data['address'],
+        current_time,
+        expiration_time,
+        account_data['private_key'],
+        paradex_config
+    )
+    # Преобразуем список в корректную JSON-строку
+    headers['PARADEX-STARKNET-SIGNATURE'] = json.dumps(signature_parts)
+    
     retry_delay_seconds = 5
     while True:
         try:
@@ -146,10 +115,9 @@ async def get_jwt_token(session, account_data, paradex_config):
             print(f"Аккаунт {account_data['account_index']}: Непредвиденная ошибка при обработке ответа JWT токена: {e}. Повторная попытка через {retry_delay_seconds} секунд...")
         await asyncio.sleep(retry_delay_seconds)
 
-
 async def get_account_info(session, jwt_token, proxy):
     """Получает информацию об аккаунте с повторными попытками."""
-    api_url = paradex_http_url + "/account"
+    api_url = "https://api.testnet.paradex.trade/v1/account"
     headers = {
         'Accept': 'application/json',
         'Authorization': f'Bearer {jwt_token}'
@@ -168,7 +136,7 @@ async def get_account_info(session, jwt_token, proxy):
 
 async def place_order(session, jwt_token, order_params, private_key, proxy, paradex_config, account_data):
     """Размещает ордер с повторными попытками."""
-    api_url = paradex_http_url + "/orders"
+    api_url = "https://api.testnet.paradex.trade/v1/orders"
     headers = {
         'Content-Type': 'application/json',
         'Accept': 'application/json',
@@ -176,19 +144,7 @@ async def place_order(session, jwt_token, order_params, private_key, proxy, para
     }
     order_params['signature_timestamp'] = int(time.time())
     order_params['account_address'] = account_data['address']
-
-    chain_id_int = get_chain_id(paradex_config["starknet_chain_id"]) # Получаем chainId как IntEnum
-    account = Account( # Создаем экземпляр Account для подписи
-        client=FullNodeClient(node_url=paradex_config["starknet_fullnode_rpc_url"]),
-        address=account_data['address'],
-        key_pair=KeyPair.from_private_key(key=hex_to_int(account_data['private_key'])),
-        chain=chain_id_int,
-    )
-    message = build_order_message(chain_id_int.value, order_params) # Используем build_order_message из helpers/auth.py
-    sig = account.sign_message(message) # Подписываем ордер, используя Account.sign_message
-    order_params['signature'] = [str(sig[0]), str(sig[1])] # Формат подписи как в примере GitHub
-
-
+    order_params['signature'] = generate_starknet_order_signature(order_params, private_key, paradex_config)
     retry_delay_seconds = 5
     while True:
         try:
@@ -203,7 +159,7 @@ async def place_order(session, jwt_token, order_params, private_key, proxy, para
 
 async def get_open_positions(session, jwt_token, proxy):
     """Получает список открытых позиций с повторными попытками."""
-    api_url = paradex_http_url + "/positions"
+    api_url = "https://api.testnet.paradex.trade/v1/positions"
     headers = {
         'Accept': 'application/json',
         'Authorization': f'Bearer {jwt_token}'
@@ -220,7 +176,7 @@ async def get_open_positions(session, jwt_token, proxy):
             print(f"Непредвиденная ошибка при получении открытых позиций: {e}. Повторная попытка через {retry_delay_seconds} секунд...")
         await asyncio.sleep(retry_delay_seconds)
 
-async def close_positions(session, jwt_token, market, positions, private_key, proxy, paradex_config, config, account_data): # Добавили account_data для place_order
+async def close_positions(session, jwt_token, market, positions, private_key, proxy, paradex_config, config):
     """Закрывает открытые позиции на рынке с повторными попытками."""
     closed_orders = []
     for position in positions.get('results', []):
@@ -234,7 +190,7 @@ async def close_positions(session, jwt_token, market, positions, private_key, pr
                 "instruction": "GTC",
                 "leverage": config['leverage']
             }
-            order_response = await place_order(session, jwt_token, close_order_params, private_key, proxy, paradex_config, account_data) # Передаем account_data
+            order_response = await place_order(session, jwt_token, close_order_params, private_key, proxy, paradex_config, config)
             if order_response:
                 closed_orders.append(order_response)
             else:
@@ -307,7 +263,7 @@ async def trade_cycle(account_data, config, paradex_config):
 
         open_positions = await get_open_positions(session, jwt_token, account_data['proxy'])
         if open_positions:
-            closed_orders = await close_positions(session, jwt_token, config['trading_pair'], open_positions, account_data['private_key'], account_data['proxy'], paradex_config, config, account_data) # Передаем account_data
+            closed_orders = await close_positions(session, jwt_token, config['trading_pair'], open_positions, account_data['private_key'], account_data['proxy'], paradex_config, config)
             print(f"Аккаунт {account_data['address']}: Закрыто {len(closed_orders)} позиций. Ответы: {closed_orders}")
         else:
             print(f"Аккаунт {account_data['address']}: Не удалось получить список открытых позиций для закрытия.")
@@ -323,6 +279,21 @@ async def trade_cycle(account_data, config, paradex_config):
         await session.close()
         print(f"Торговый цикл для аккаунта {account_data['address']} завершен.\n")
 
+async def get_paradex_config(paradex_http_url):
+    """Загружает конфигурацию Paradex API."""
+    url = paradex_http_url + '/system/config'
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url) as response:
+            print(f"Запрос config, статус ответа: {response.status}")
+            try:
+                response.raise_for_status()
+            except aiohttp.ClientResponseError as e:
+                print(f"Ошибка при загрузке paradex_config: HTTP статус {response.status}, текст ошибки: {e}")
+                return None
+            except Exception as e:
+                print(f"Непредвиденная ошибка при загрузке paradex_config: {e}")
+                return None
+            return await response.json()
 
 # --- Основная функция бота ---
 async def main():
@@ -352,7 +323,7 @@ async def main():
         print(f"Ошибка: Количество кошельков ({len(wallets)}) не соответствует количеству прокси ({len(proxies)}). Бот остановлен.")
         return
 
-    paradex_config = await get_paradex_config_from_api() # Используем функцию для загрузки конфига
+    paradex_config = await get_paradex_config("https://api.testnet.paradex.trade/v1")
     if not paradex_config:
         print("Не удалось загрузить конфигурацию Paradex.")
         return
@@ -430,10 +401,4 @@ async def main():
     print("Все торговые циклы завершены.")
 
 if __name__ == "__main__":
-    # Logging setup (optional, but good for debugging)
-    logging.basicConfig(
-        level=os.getenv("LOGGING_LEVEL", "INFO"), # Можно установить уровень логирования через переменную окружения LOGGING_LEVEL, например DEBUG, INFO, WARNING, ERROR, CRITICAL
-        format="%(asctime)s.%(msecs)03d | %(levelname)s | %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-    )
     asyncio.run(main())
