@@ -145,16 +145,23 @@ async def place_order(session, jwt_token, order_params, private_key, proxy, para
     order_params['signature_timestamp'] = int(time.time())
     order_params['account_address'] = account_data['address']
     order_params['signature'] = generate_starknet_order_signature(order_params, private_key, paradex_config)
+
+    #  Удаляем лишние параметры 'leverage' и 'account_address' из order_params ПЕРЕД отправкой
+    order_params_to_send = {
+        key: order_params[key] for key in order_params if key not in ('leverage', 'account_address')
+    }
+    print(f"Параметры ордера перед отправкой (JSON): {json.dumps(order_params_to_send)}") # Лог отправляемых параметров
+
     retry_delay_seconds = 5
     while True:
         try:
-            async with session.post(api_url, headers=headers, json=order_params, proxy=proxy) as response:
+            async with session.post(api_url, headers=headers, json=order_params_to_send, proxy=proxy) as response: # <---- Отправляем order_params_to_send
                 response.raise_for_status()
                 return await response.json()
         except aiohttp.ClientError as e:
-            print(f"Ошибка размещения ордера: {e}, Параметры: {order_params}. Повторная попытка через {retry_delay_seconds} секунд...")
+            print(f"Ошибка размещения ордера: {e}, Параметры: {order_params_to_send}. Повторная попытка через {retry_delay_seconds} секунд...") # Лог с order_params_to_send
         except Exception as e:
-            print(f"Непредвиденная ошибка при размещении ордера: {e}. Параметры: {order_params}. Повторная попытка через {retry_delay_seconds} секунд...")
+            print(f"Непредвиденная ошибка при размещении ордера: {e}. Параметры: {order_params_to_send}. Повторная попытка через {retry_delay_seconds} секунд...") # Лог с order_params_to_send
         await asyncio.sleep(retry_delay_seconds)
 
 async def get_open_positions(session, jwt_token, proxy):

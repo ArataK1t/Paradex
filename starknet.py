@@ -59,7 +59,7 @@ def generate_starknet_auth_signature(account_address: str, timestamp: int, expir
     return [str(r), str(s)]
 
 
-def generate_starknet_order_signature(order_params: dict, private_key_hex: str, paradex_config: dict) -> list[str]:
+def generate_starknet_order_signature(order_params: dict, private_key_hex: str, paradex_config: dict) -> str: # <----  ВОЗВРАЩАЕМ СТРОКУ, А НЕ СПИСОК
     """
     Генерирует подпись для ордера согласно документации Paradex.
     ... (описание функции) ...
@@ -67,7 +67,7 @@ def generate_starknet_order_signature(order_params: dict, private_key_hex: str, 
     chain_id = int_from_bytes(paradex_config["starknet_chain_id"].encode())
 
     order_msg = {
-        "domain": {"name": "Paradex", "chainId": hex(chain_id), "version": "1"},
+        "domain": {"name": "Paradex", "chainId": hex(chain_id), "version": "1"}, # <----  chainId ОСТАЕТСЯ ИЗ КОНФИГА (проверьте правильность!)
         "primaryType": "Order",
         "types": {
             "StarkNetDomain": [
@@ -100,8 +100,10 @@ def generate_starknet_order_signature(order_params: dict, private_key_hex: str, 
     account_int = int(order_params['account_address'], 16)
     msg_hash = typed_data.message_hash(account_int)
 
-    print(f"TypedData для ордера (JSON):\n{json.dumps(order_msg, indent=2)}") # <---- ДОБАВЛЕН ЛОГ TypedData
-    print(f"Message Hash для ордера: {msg_hash}") # <---- ДОБАВЛЕН ЛОГ Message Hash
+    print(f"TypedData для ордера (JSON):\n{json.dumps(order_msg, indent=2)}")
+    print(f"Message Hash для ордера: {msg_hash}")
 
     r, s = message_signature(msg_hash, int(private_key_hex, 16))
-    return [str(r), str(s)]
+    # Исправленная подпись: объединяем r и s в одну строку (hex)
+    signature_str = hex(r) + hex(s)[2:] # Убираем "0x" у второго hex и объединяем
+    return signature_str # <---- ВОЗВРАЩАЕМ ПОДПИСЬ КАК СТРОКУ
