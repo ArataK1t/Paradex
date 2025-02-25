@@ -98,7 +98,7 @@ def generate_starknet_order_signature(order_params: dict, private_key_hex: str, 
             "side": "1" if order_params['side'] == "BUY" else "2",
             "orderType": order_params['type'],
             "size": int(float(order_params['size'])),
-            "price": int(order_params.get('price', 0)),
+            "price": int(float(order_params.get('price', 0))),
         },
     }
     
