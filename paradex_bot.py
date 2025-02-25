@@ -4,6 +4,7 @@ import asyncio
 import json
 import time
 import random
+import uuid # Импортируем uuid
 
 # --- Импорт функций StarkNet подписи из файла (см. ниже) ---
 from starknet import generate_starknet_auth_signature, generate_starknet_order_signature
@@ -28,7 +29,8 @@ def load_config():
                 "delay_between_trades_seconds",
                 "delay_between_buy_sell_seconds",
                 "delay_between_groups_seconds",
-                "cycles_per_account"
+                "cycles_per_account",
+                "paradex_config" # <---- paradex_config теперь обязательный параметр
             ]
             for param in required_params:
                 if param not in config:
@@ -92,7 +94,7 @@ async def get_jwt_token(session, account_data, paradex_config):
     )
     # Преобразуем список в корректную JSON-строку
     headers['PARADEX-STARKNET-SIGNATURE'] = json.dumps(signature_parts)
-    
+
     retry_delay_seconds = 5
     while True:
         try:
@@ -148,7 +150,15 @@ async def place_order(session, jwt_token, order_params, private_key, proxy, para
 
     #  Удаляем лишние параметры 'leverage' и 'account_address' из order_params ПЕРЕД отправкой
     order_params_to_send = {
-        key: order_params[key] for key in order_params if key not in ('leverage', 'account_address')
+        "market": order_params['market'],
+        "side": order_params['side'],
+        "type": order_params['type'],
+        "size": str(0.01) if order_params['type'] == "MARKET" else str(order_params['size']), # Size как строка с десятичной точкой, только для MARKET
+        "instruction": "GTC", # <---- Возвращаем instruction обратно, как было в документации и раньше в коде
+        "signature_timestamp": order_params['signature_timestamp'], # Timestamp как ЧИСЛО (int) - БЕЗ преобразования в строку
+        "signature": order_params['signature'],
+        "client_id": str(uuid.uuid4()),  # <---- Добавляем client_id (UUID строка)
+        "price": "0" if order_params['type'] == "MARKET" else str(order_params.get('price', 0)), # Price как строка "0" для MARKET, иначе из параметров
     }
     print(f"Параметры ордера перед отправкой (JSON): {json.dumps(order_params_to_send)}") # Лог отправляемых параметров
 
@@ -156,12 +166,16 @@ async def place_order(session, jwt_token, order_params, private_key, proxy, para
     while True:
         try:
             async with session.post(api_url, headers=headers, json=order_params_to_send, proxy=proxy) as response: # <---- Отправляем order_params_to_send
-                response.raise_for_status()
+                print(f"Аккаунт {account_data['account_index']}: Запрос размещения ордера, статус ответа: {response.status}")
+                response_text = await response.text() # Логируем response.text() для тела ответа
+                print(f"Аккаунт {account_data['account_index']}: Полный ответ сервера на запрос ордера: {response_text}") # Лог полного ответа
+                response.raise_for_status() # Вызываем исключение для HTTP ошибок
                 return await response.json()
         except aiohttp.ClientError as e:
-            print(f"Ошибка размещения ордера: {e}, Параметры: {order_params_to_send}. Повторная попытка через {retry_delay_seconds} секунд...") # Лог с order_params_to_send
+            error_text = await e.response.text() if e.response else str(e) # Пытаемся получить текст ошибки из ответа
+            print(f"Аккаунт {account_data['account_index']}: Ошибка размещения ордера: {e},  Подробности ошибки (если есть): {error_text}, Параметры: {order_params_to_send}. Повторная попытка через {retry_delay_seconds} секунд...") # Лог с order_params_to_send и деталями ошибки
         except Exception as e:
-            print(f"Непредвиденная ошибка при размещении ордера: {e}. Параметры: {order_params_to_send}. Повторная попытка через {retry_delay_seconds} секунд...") # Лог с order_params_to_send
+            print(f"Аккаунт {account_data['account_index']}: Непредвиденная ошибка при размещении ордера: {e}. Параметры: {order_params_to_send}. Повторная попытка через {retry_delay_seconds} секунд...") # Лог с order_params_to_send
         await asyncio.sleep(retry_delay_seconds)
 
 async def get_open_positions(session, jwt_token, proxy):
@@ -234,6 +248,7 @@ async def trade_cycle(account_data, config, paradex_config):
         balance_usage_percent = random.uniform(balance_usage_percentage_min, balance_usage_percentage_max) / 100.0
         position_size_usd = free_collateral * balance_usage_percent
         print(f"Аккаунт {account_data['address']}: Free collateral = {free_collateral}, Размер позиции (USD) = {position_size_usd:.2f}")
+        initial_size = str(int(position_size_usd)) # <---- Сохраняем initial_size
 
         # --- Размещение ордеров (Лонг/Шорт) ---
         order_side = account_data['order_side']
@@ -245,8 +260,8 @@ async def trade_cycle(account_data, config, paradex_config):
             "market": config['trading_pair'],
             "side": order_side if order_side != "SHORT_HALF" else "SELL",
             "type": "MARKET",
-            "size": order_size,
-            "instruction": "GTC",
+            "size": initial_size, # <---- Используем initial_size, как и раньше
+            "instruction": "GTC", # <---- Возвращаем instruction
             "leverage": config['leverage']
         }
 
@@ -330,10 +345,15 @@ async def main():
         print(f"Ошибка: Количество кошельков ({len(wallets)}) не соответствует количеству прокси ({len(proxies)}). Бот остановлен.")
         return
 
-    paradex_config = await get_paradex_config("https://api.testnet.paradex.trade/v1")
+    paradex_config = config.get('paradex_config') # <---- Берем paradex_config из config.json
     if not paradex_config:
-        print("Не удалось загрузить конфигурацию Paradex.")
-        return
+        paradex_config = await get_paradex_config("https://api.testnet.paradex.trade/v1") # <---- Если нет в config.json, то запрашиваем
+        if paradex_config:
+            config['paradex_config'] = paradex_config # <---- Сохраняем полученную конфигурацию в config
+        else:
+            print("Не удалось загрузить конфигурацию Paradex.")
+            return
+
 
     # Связывание кошельков, прокси и User-Agent (1 к 1)
     account_data_list = []
