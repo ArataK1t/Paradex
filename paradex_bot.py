@@ -230,9 +230,9 @@ async def trade_cycle(account_data, config, paradex_config):
 
         # --- Размещение ордеров (Лонг/Шорт) ---
         order_side = account_data['order_side']
-        order_size = str(position_size_usd)
+        order_size = str(int(position_size_usd))
         if order_side == "SHORT_HALF":
-            order_size = str(position_size_usd / 2.0)
+            order_size = str(int(position_size_usd / 2.0))
 
         order_params = {
             "market": config['trading_pair'],
