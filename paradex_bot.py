@@ -242,12 +242,17 @@ async def trade_cycle(account_data, config, paradex_config):
             order_size = str(int(position_size_usd / 2.0))
 
         order_params = {
-            "market": config['trading_pair'],
-            "side": order_side if order_side != "SHORT_HALF" else "SELL",
-            "type": "MARKET",
-            "size": order_size,
+            "client_id": str(random.randint(100000, 999999)),
+            "flags": ["REDUCE_ONLY"],
             "instruction": "GTC",
-            "leverage": config['leverage']
+            "market": config['trading_pair'],
+            "price": "0",             # Для MARKET ордера может быть "0"
+            "recv_window": 5000,        # Задаем окно приёма запроса (примерное значение)
+            "side": order_side if order_side != "SHORT_HALF" else "SELL",
+            "size": order_size,         # Убедитесь, что формат размера соответствует требованиям (см. Вариант 3)
+            "stp": "EXPIRE_MAKER",      # Значение из примера документации
+            "trigger_price": "0",       # Если не используется, можно выставить "0"
+            "type": "MARKET",
         }
 
         order_response = await place_order(session, jwt_token, order_params, account_data['private_key'], account_data['proxy'], paradex_config, account_data)
