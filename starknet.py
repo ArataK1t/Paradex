@@ -85,14 +85,14 @@ def generate_starknet_order_signature(order_params: dict, private_key_hex: str, 
             ],
         },
         "message": {
-            "timestamp": int(order_params['signature_timestamp']),
+            "timestamp": str(order_params['signature_timestamp']),
             # При необходимости можно преобразовать строку в felt (например, используя encode_shortstring)
             "market": order_params['market'],
             # Преобразуем сторону в строковое представление: "1" для BUY, "2" для SELL
             "side": "1" if order_params['side'] == "BUY" else "2",
             "orderType": order_params['type'],
-            "size": int(float(order_params['size'])),
-            "price": int(float(order_params.get('price', 0))),
+            "size": str(int(float(order_params['size']))),
+            "price": str(int(float(order_params.get('price', 0)))),
         },
     }
 
