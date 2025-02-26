@@ -135,34 +135,43 @@ async def get_account_info(session, jwt_token, proxy):
         await asyncio.sleep(retry_delay_seconds)
 
 async def place_order(session, jwt_token, order_params, private_key, proxy, paradex_config, account_data):
-    """Размещает ордер с повторными попытками."""
     api_url = "https://api.testnet.paradex.trade/v1/orders"
     headers = {
         'Content-Type': 'application/json',
         'Accept': 'application/json',
         'Authorization': f'Bearer {jwt_token}'
     }
+    
+    # Добавляем дефолтные значения для обязательных полей, если их нет
+    order_params.setdefault("client_id", str(random.randint(100000, 999999)))
+    order_params.setdefault("flags", ["REDUCE_ONLY"])
+    order_params.setdefault("recv_window", 5000)
+    order_params.setdefault("stp", "EXPIRE_MAKER")
+    order_params.setdefault("trigger_price", "0")
+    order_params.setdefault("price", "0")
+    
     order_params['signature_timestamp'] = int(time.time())
     order_params['account_address'] = account_data['address']
     order_params['signature'] = generate_starknet_order_signature(order_params, private_key, paradex_config)
-
-    #  Удаляем лишние параметры 'leverage' и 'account_address' из order_params ПЕРЕД отправкой
-    order_params_to_send = {
-        key: order_params[key] for key in order_params if key not in ('leverage', 'account_address')
-    }
-    print(f"Параметры ордера перед отправкой (JSON): {json.dumps(order_params_to_send)}") # Лог отправляемых параметров
-
+    
+    # Если у вас не нужно отправлять leverage и account_address, их можно удалить:
+    keys_to_remove = ['leverage', 'account_address']
+    order_params_to_send = { key: order_params[key] for key in order_params if key not in keys_to_remove }
+    
+    print(f"Параметры ордера перед отправкой (JSON): {json.dumps(order_params_to_send)}")
+    
     retry_delay_seconds = 5
     while True:
         try:
-            async with session.post(api_url, headers=headers, json=order_params_to_send, proxy=proxy) as response: # <---- Отправляем order_params_to_send
+            async with session.post(api_url, headers=headers, json=order_params_to_send, proxy=proxy) as response:
                 response.raise_for_status()
                 return await response.json()
         except aiohttp.ClientError as e:
-            print(f"Ошибка размещения ордера: {e}, Параметры: {order_params_to_send}. Повторная попытка через {retry_delay_seconds} секунд...") # Лог с order_params_to_send
+            print(f"Ошибка размещения ордера: {e}, Параметры: {order_params_to_send}. Повторная попытка через {retry_delay_seconds} секунд...")
         except Exception as e:
-            print(f"Непредвиденная ошибка при размещении ордера: {e}. Параметры: {order_params_to_send}. Повторная попытка через {retry_delay_seconds} секунд...") # Лог с order_params_to_send
+            print(f"Непредвиденная ошибка при размещении ордера: {e}. Параметры: {order_params_to_send}. Повторная попытка через {retry_delay_seconds} секунд...")
         await asyncio.sleep(retry_delay_seconds)
+
 
 async def get_open_positions(session, jwt_token, proxy):
     """Получает список открытых позиций с повторными попытками."""
@@ -242,17 +251,12 @@ async def trade_cycle(account_data, config, paradex_config):
             order_size = str(int(position_size_usd / 2.0))
 
         order_params = {
-            "client_id": str(random.randint(100000, 999999)),
-            "flags": ["REDUCE_ONLY"],
-            "instruction": "GTC",
             "market": config['trading_pair'],
-            "price": "0",             # Для MARKET ордера может быть "0"
-            "recv_window": 5000,        # Задаем окно приёма запроса (примерное значение)
             "side": order_side if order_side != "SHORT_HALF" else "SELL",
-            "size": order_size,         # Убедитесь, что формат размера соответствует требованиям (см. Вариант 3)
-            "stp": "EXPIRE_MAKER",      # Значение из примера документации
-            "trigger_price": "0",       # Если не используется, можно выставить "0"
             "type": "MARKET",
+            "size": order_size,
+            "instruction": "GTC",
+            "leverage": config['leverage']
         }
 
         order_response = await place_order(session, jwt_token, order_params, account_data['private_key'], account_data['proxy'], paradex_config, account_data)
