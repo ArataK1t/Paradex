@@ -59,15 +59,18 @@ def generate_starknet_auth_signature(account_address: str, timestamp: int, expir
     return [str(r), str(s)]
 
 
-def generate_starknet_order_signature(order_params: dict, private_key_hex: str, paradex_config: dict) -> str: # <----  ВОЗВРАЩАЕМ СТРОКУ, А НЕ СПИСОК
-    """
-    Генерирует подпись для ордера согласно документации Paradex.
-    ... (описание функции) ...
-    """
-    chain_id = int_from_bytes(paradex_config["starknet_chain_id"].encode())
+from decimal import Decimal, getcontext
 
+getcontext().prec = 28  # задаём нужную точность
+
+def generate_starknet_order_signature(order_params: dict, private_key_hex: str, paradex_config: dict) -> str:
+    chain_id = int_from_bytes(paradex_config["starknet_chain_id"].encode())
+    
+    # Используем значение размера как Decimal
+    order_size = Decimal(order_params['size'])
+    
     order_msg = {
-        "domain": {"name": "Paradex", "chainId": hex(chain_id), "version": "1"}, # <----  chainId ОСТАЕТСЯ ИЗ КОНФИГА (проверьте правильность!)
+        "domain": {"name": "Paradex", "chainId": hex(chain_id), "version": "1"},
         "primaryType": "Order",
         "types": {
             "StarkNetDomain": [
@@ -80,19 +83,19 @@ def generate_starknet_order_signature(order_params: dict, private_key_hex: str, 
                 {"name": "market", "type": "felt"},
                 {"name": "side", "type": "felt"},
                 {"name": "orderType", "type": "felt"},
+                # Преобразуем Decimal в число (например, умножив на 10**N, если API требует фиксированного числа знаков)
                 {"name": "size", "type": "felt"},
                 {"name": "price", "type": "felt"},
             ],
         },
         "message": {
             "timestamp": int(order_params['signature_timestamp']),
-            # При необходимости можно преобразовать строку в felt (например, используя encode_shortstring)
             "market": order_params['market'],
-            # Преобразуем сторону в строковое представление: "1" для BUY, "2" для SELL
             "side": "1" if order_params['side'] == "BUY" else "2",
             "orderType": order_params['type'],
-            "size": int(float(order_params['size'])),
-            "price": int(float(order_params.get('price', 0))),
+            # Например, если API ожидает число без десятичной точки, умножьте на 100 (или другое значение) и округлите:
+            "size": int(order_size * Decimal(100)),  
+            "price": int(Decimal(order_params.get('price', "0"))),
         },
     }
 
@@ -100,10 +103,7 @@ def generate_starknet_order_signature(order_params: dict, private_key_hex: str, 
     account_int = int(order_params['account_address'], 16)
     msg_hash = typed_data.message_hash(account_int)
 
-    print(f"TypedData для ордера (JSON):\n{json.dumps(order_msg, indent=2)}")
-    print(f"Message Hash для ордера: {msg_hash}")
-
     r, s = message_signature(msg_hash, int(private_key_hex, 16))
-    # Исправленная подпись: объединяем r и s в одну строку (hex)
-    signature_str = hex(r) + hex(s)[2:] # Убираем "0x" у второго hex и объединяем
-    return signature_str # <---- ВОЗВРАЩАЕМ ПОДПИСЬ КАК СТРОКУ
+    signature_str = hex(r) + hex(s)[2:]
+    return signature_str
+

@@ -237,22 +237,17 @@ async def trade_cycle(account_data, config, paradex_config):
 
         # --- Размещение ордеров (Лонг/Шорт) ---
         order_side = account_data['order_side']
-        order_size = "{:.2f}".format(position_size_usd)
+        order_size = str(int(position_size_usd))
         if order_side == "SHORT_HALF":
-            order_size = "{:.2f}".format(position_size_usd / 2.0)
+            order_size = str(int(position_size_usd / 2.0))
 
         order_params = {
-            "client_id": str(random.randint(100000, 999999)),
-            "flags": ["REDUCE_ONLY"],
-            "instruction": "GTC",
             "market": config['trading_pair'],
-            "price": "0",
-            "recv_window": 5000,
             "side": order_side if order_side != "SHORT_HALF" else "SELL",
-            "size": order_size,
-            "stp": "EXPIRE_MAKER",
-            "trigger_price": "0",
             "type": "MARKET",
+            "size": order_size,
+            "instruction": "GTC",
+            "leverage": config['leverage']
         }
 
         order_response = await place_order(session, jwt_token, order_params, account_data['private_key'], account_data['proxy'], paradex_config, account_data)
