@@ -159,6 +159,8 @@ async def place_order(session, jwt_token, order_params, private_key, proxy, para
                 response.raise_for_status()
                 return await response.json()
         except aiohttp.ClientError as e:
+            raw_error_response_text = await response.text()
+            print(f"Аккаунт {account_data['account_index']}: Полный текст ответа об ошибке 400: {raw_error_response_text}")
             print(f"Ошибка размещения ордера: {e}, Параметры: {order_params_to_send}. Повторная попытка через {retry_delay_seconds} секунд...") # Лог с order_params_to_send
         except Exception as e:
             print(f"Непредвиденная ошибка при размещении ордера: {e}. Параметры: {order_params_to_send}. Повторная попытка через {retry_delay_seconds} секунд...") # Лог с order_params_to_send
