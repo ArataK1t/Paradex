@@ -59,23 +59,15 @@ def generate_starknet_auth_signature(account_address: str, timestamp: int, expir
     return [str(r), str(s)]
 
 
-from decimal import Decimal, getcontext
-getcontext().prec = 28
-
-def generate_starknet_order_signature(order_params: dict, private_key_hex: str, paradex_config: dict) -> str:
+def generate_starknet_order_signature(order_params: dict, private_key_hex: str, paradex_config: dict) -> str: # <----  ВОЗВРАЩАЕМ СТРОКУ, А НЕ СПИСОК
+    """
+    Генерирует подпись для ордера согласно документации Paradex.
+    ... (описание функции) ...
+    """
     chain_id = int_from_bytes(paradex_config["starknet_chain_id"].encode())
-    
-    # Преобразуем значение размера из order_params (например, "0.12245013") в Decimal.
-    size_decimal = Decimal(order_params['size'])
-    # Используем множитель 100000000 для перевода BTC в сатоши
-    signature_size = int(size_decimal * Decimal('100000000'))
-    
+
     order_msg = {
-        "domain": {
-            "name": "Paradex",
-            "chainId": hex(chain_id),
-            "version": "1"
-        },
+        "domain": {"name": "Paradex", "chainId": hex(chain_id), "version": "1"}, # <----  chainId ОСТАЕТСЯ ИЗ КОНФИГА (проверьте правильность!)
         "primaryType": "Order",
         "types": {
             "StarkNetDomain": [
@@ -94,23 +86,24 @@ def generate_starknet_order_signature(order_params: dict, private_key_hex: str, 
         },
         "message": {
             "timestamp": int(order_params['signature_timestamp']),
+            # При необходимости можно преобразовать строку в felt (например, используя encode_shortstring)
             "market": order_params['market'],
+            # Преобразуем сторону в строковое представление: "1" для BUY, "2" для SELL
             "side": "1" if order_params['side'] == "BUY" else "2",
             "orderType": order_params['type'],
-            "size": signature_size,  # Теперь размер в сатоши
-            "price": int(Decimal(order_params.get('price', "0"))),
+            "size": int(float(order_params['size'])),
+            "price": int(float(order_params.get('price', 0))),
         },
     }
-    
-    print("TypedData для ордера (JSON):")
-    print(json.dumps(order_msg, indent=2))
-    
+
     typed_data = TypedData.from_dict(order_msg)
     account_int = int(order_params['account_address'], 16)
     msg_hash = typed_data.message_hash(account_int)
-    print(f"Message Hash для ордера: {msg_hash}")
-    
-    r, s = message_signature(msg_hash, int(private_key_hex, 16))
-    signature_str = hex(r) + hex(s)[2:]
-    return signature_str
 
+    print(f"TypedData для ордера (JSON):\n{json.dumps(order_msg, indent=2)}")
+    print(f"Message Hash для ордера: {msg_hash}")
+
+    r, s = message_signature(msg_hash, int(private_key_hex, 16))
+    # Исправленная подпись: объединяем r и s в одну строку (hex)
+    signature_str = hex(r) + hex(s)[2:] # Убираем "0x" у второго hex и объединяем
+    return signature_str # <---- ВОЗВРАЩАЕМ ПОДПИСЬ КАК СТРОКУ
