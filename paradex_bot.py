@@ -250,6 +250,7 @@ async def trade_cycle(account_data, config, paradex_config):
             "price": "0"
             #"leverage": config['leverage']
         }
+        order_params['account_address'] = account_data['address']
         order_params['signature_timestamp'] = int(time.time())
         order_params['signature'] = generate_starknet_order_signature(
             order_params, account_data['private_key'], paradex_config
