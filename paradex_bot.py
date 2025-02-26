@@ -247,8 +247,15 @@ async def trade_cycle(account_data, config, paradex_config):
             "type": "MARKET",
             "size": order_size,
             "instruction": "GTC",
-            "leverage": config['leverage']
+            "price": "0"
+            #"leverage": config['leverage']
         }
+        order_params['signature_timestamp'] = int(time.time())
+        order_params['signature'] = generate_starknet_order_signature(
+            order_params, account_data['private_key'], paradex_config
+        )
+
+        print(f"Параметры ордера перед отправкой (JSON): {json.dumps(order_params)}") # Для отладки
 
         order_response = await place_order(session, jwt_token, order_params, account_data['private_key'], account_data['proxy'], paradex_config, account_data)
         if order_response:
