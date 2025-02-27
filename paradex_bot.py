@@ -49,7 +49,8 @@ def load_wallets():
 def load_proxies():
     try:
         with open(PROXY_FILE, 'r') as f:
-            return [line.strip() for line in f if line.strip()]
+            proxies = [line.strip() for line in f if line.strip()]
+            return proxies
     except FileNotFoundError:
         print(f"Ошибка: Файл прокси '{PROXY_FILE}' не найден.")
         return []
@@ -57,7 +58,8 @@ def load_proxies():
 def load_user_agents():
     try:
         with open(USER_AGENT_FILE, 'r') as f:
-            return [line.strip() for line in f if line.strip()]
+            user_agents = [line.strip() for line in f if line.strip()]
+            return user_agents
     except FileNotFoundError:
         print(f"Ошибка: Файл User-Agent '{USER_AGENT_FILE}' не найден.")
         return []
@@ -81,25 +83,27 @@ async def get_jwt_token(session, account_data, paradex_config):
     )
     headers['PARADEX-STARKNET-SIGNATURE'] = json.dumps(signature_parts)
     
-    retry_delay = 5
+    retry_delay_seconds = 5
     while True:
         try:
             async with session.post(api_url, headers=headers, proxy=account_data['proxy']) as response:
                 print(f"Аккаунт {account_data['account_index']}: Запрос JWT, статус ответа: {response.status}")
                 response.raise_for_status()
-                raw_text = await response.text()
-                print(f"Аккаунт {account_data['account_index']}: Raw JWT Response Text: {raw_text}")
-                data = await response.json()
-                print(f"Аккаунт {account_data['account_index']}: Parsed JWT Response JSON: {data}")
-                jwt_token = data.get("jwt_token")
+                raw_response_text = await response.text()
+                print(f"Аккаунт {account_data['account_index']}: Raw JWT Response Text: {raw_response_text}")
+                jwt_response_json = await response.json()
+                print(f"Аккаунт {account_data['account_index']}: Parsed JWT Response JSON: {jwt_response_json}")
+                jwt_token = jwt_response_json.get('jwt_token')
                 if jwt_token:
                     print(f"Аккаунт {account_data['account_index']}: JWT токен успешно получен.")
                     return jwt_token
                 else:
-                    print(f"Аккаунт {account_data['account_index']}: Ошибка получения JWT: токен не найден.")
+                    print(f"Аккаунт {account_data['account_index']}: Ошибка получения JWT токена, токен не найден. Ответ API: {jwt_response_json}")
+        except aiohttp.ClientError as e:
+            print(f"Аккаунт {account_data['account_index']}: Ошибка API при запросе JWT токена: {e}. Повторная попытка через {retry_delay_seconds} секунд...")
         except Exception as e:
-            print(f"Аккаунт {account_data['account_index']}: Ошибка при запросе JWT: {e}. Повтор через {retry_delay} секунд.")
-        await asyncio.sleep(retry_delay)
+            print(f"Аккаунт {account_data['account_index']}: Непредвиденная ошибка при обработке ответа JWT токена: {e}. Повторная попытка через {retry_delay_seconds} секунд...")
+        await asyncio.sleep(retry_delay_seconds)
 
 async def get_account_info(session, jwt_token, proxy):
     api_url = "https://api.testnet.paradex.trade/v1/account"
@@ -107,15 +111,17 @@ async def get_account_info(session, jwt_token, proxy):
         'Accept': 'application/json',
         'Authorization': f'Bearer {jwt_token}'
     }
-    retry_delay = 5
+    retry_delay_seconds = 5
     while True:
         try:
             async with session.get(api_url, headers=headers, proxy=proxy) as response:
                 response.raise_for_status()
                 return await response.json()
+        except aiohttp.ClientError as e:
+            print(f"Ошибка получения информации об аккаунте: {e}. Повторная попытка через {retry_delay_seconds} секунд...")
         except Exception as e:
-            print(f"Ошибка получения информации об аккаунте: {e}. Повтор через {retry_delay} секунд.")
-        await asyncio.sleep(retry_delay)
+            print(f"Непредвиденная ошибка при получении информации об аккаунте: {e}. Повторная попытка через {retry_delay_seconds} секунд...")
+        await asyncio.sleep(retry_delay_seconds)
 
 async def place_order(session, jwt_token, order_params, private_key, proxy, paradex_config, account_data):
     api_url = "https://api.testnet.paradex.trade/v1/orders"
@@ -124,34 +130,36 @@ async def place_order(session, jwt_token, order_params, private_key, proxy, para
         'Accept': 'application/json',
         'Authorization': f'Bearer {jwt_token}'
     }
-    # Используем миллисекунды для signature_timestamp
+    # Используем миллисекунды для timestamp
     order_params['signature_timestamp'] = int(time.time() * 1000)
     if 'stp' not in order_params:
         order_params['stp'] = "EXPIRE_TAKER"
     print(f"Исходные параметры ордера до подписи: {json.dumps(order_params)}")
-    # Генерация подписи
+    # Генерация подписи; передаём account_data['address'] для логирования (но не используем в хеше)
     order_params['signature'] = generate_starknet_order_signature(order_params, private_key, paradex_config, account_data['address'])
     
-    # Формируем payload: удаляем лишние поля; для MARKET ордеров удаляем поле price.
-    order_payload = {k: order_params[k] for k in order_params if k not in ("leverage", "account_address")}
-    if order_payload.get("type") in ("MARKET", "STOP_MARKET", "STOP_LOSS_MARKET", "TAKE_PROFIT_MARKET"):
-        order_payload.pop("price", None)
-    print(f"Параметры ордера перед отправкой (JSON): {json.dumps(order_payload)}")
+    # Формируем payload согласно документации: если тип MARKET, поле price нужно исключить.
+    order_params_to_send = { key: order_params[key] for key in order_params if key not in ('leverage', 'account_address') }
+    if order_params_to_send.get("type") in ("MARKET", "STOP_MARKET", "STOP_LOSS_MARKET", "TAKE_PROFIT_MARKET"):
+        order_params_to_send.pop("price", None)
+    print(f"Параметры ордера перед отправкой (JSON): {json.dumps(order_params_to_send)}")
     
-    retry_delay = 5
+    retry_delay_seconds = 5
     while True:
         try:
-            async with session.post(api_url, headers=headers, json=order_payload, proxy=proxy) as response:
-                resp_text = await response.text()
+            async with session.post(api_url, headers=headers, json=order_params_to_send, proxy=proxy) as response:
+                response_text = await response.text()
                 if response.status in (200, 201):
-                    print(f"Ордер успешно создан. Статус: {response.status}. Ответ: {resp_text}")
+                    print(f"Ордер успешно создан. Статус: {response.status}. Ответ: {response_text}")
                     return await response.json()
                 else:
-                    print(f"Ошибка размещения ордера: статус {response.status}. Ответ: {resp_text}. Параметры: {order_payload}")
+                    print(f"Ошибка размещения ордера: статус {response.status}. Ответ: {response_text}. Параметры: {order_params_to_send}")
                     response.raise_for_status()
+        except aiohttp.ClientError as e:
+            print(f"Ошибка размещения ордера: {e}, Параметры: {order_params_to_send}. Повторная попытка через {retry_delay_seconds} секунд...")
         except Exception as e:
-            print(f"Ошибка размещения ордера: {e}. Параметры: {order_payload}. Повтор через {retry_delay} секунд.")
-        await asyncio.sleep(retry_delay)
+            print(f"Непредвиденная ошибка при размещении ордера: {e}. Параметры: {order_params_to_send}. Повторная попытка через {retry_delay_seconds} секунд...")
+        await asyncio.sleep(retry_delay_seconds)
 
 async def get_open_positions(session, jwt_token, proxy):
     api_url = "https://api.testnet.paradex.trade/v1/positions"
@@ -159,15 +167,17 @@ async def get_open_positions(session, jwt_token, proxy):
         'Accept': 'application/json',
         'Authorization': f'Bearer {jwt_token}'
     }
-    retry_delay = 5
+    retry_delay_seconds = 5
     while True:
         try:
             async with session.get(api_url, headers=headers, proxy=proxy) as response:
                 response.raise_for_status()
                 return await response.json()
+        except aiohttp.ClientError as e:
+            print(f"Ошибка получения открытых позиций: {e}. Повторная попытка через {retry_delay_seconds} секунд...")
         except Exception as e:
-            print(f"Ошибка получения открытых позиций: {e}. Повтор через {retry_delay} секунд.")
-        await asyncio.sleep(retry_delay)
+            print(f"Непредвиденная ошибка при получении открытых позиций: {e}. Повторная попытка через {retry_delay_seconds} секунд...")
+        await asyncio.sleep(retry_delay_seconds)
 
 async def close_positions(session, jwt_token, market, positions, private_key, proxy, paradex_config, config, account_data):
     closed_orders = []
@@ -198,24 +208,24 @@ async def trade_cycle(account_data, config, paradex_config):
     try:
         jwt_token = await get_jwt_token(session, account_data, paradex_config)
         if not jwt_token:
-            print(f"Аккаунт {account_data['address']}: Пропуск из-за отсутствия JWT.")
+            print(f"Пропускаем аккаунт {account_data['address']} из-за ошибки аутентификации.")
             return
         account_info = await get_account_info(session, jwt_token, account_data['proxy'])
         if not account_info:
-            print(f"Аккаунт {account_data['address']}: Пропуск из-за отсутствия информации об аккаунте.")
+            print(f"Пропускаем аккаунт {account_data['address']} из-за ошибки получения информации об аккаунте.")
             return
         if account_info.get('status') != 'ACTIVE':
-            print(f"Аккаунт {account_data['address']}: не активен (статус: {account_info.get('status')}). Пропуск.")
+            print(f"Аккаунт {account_data['address']} не активен. Статус: {account_info.get('status')}. Пропускаем.")
             return
         free_collateral = float(account_info.get('free_collateral', 0))
         if free_collateral <= 0:
-            print(f"Аккаунт {account_data['address']}: Недостаточно free collateral ({free_collateral}). Пропуск.")
+            print(f"Аккаунт {account_data['address']} имеет недостаточно free collateral ({free_collateral}). Пропускаем.")
             return
 
-        balance_usage_min, balance_usage_max = config['balance_usage_percentage']
-        balance_percent = random.uniform(balance_usage_min, balance_usage_max) / 100.0
-        position_size_usd = free_collateral * balance_percent
-        print(f"Аккаунт {account_data['address']}: Free collateral = {free_collateral}, Размер позиции = {position_size_usd:.2f} USD")
+        balance_usage_percentage_min, balance_usage_percentage_max = config['balance_usage_percentage']
+        balance_usage_percent = random.uniform(balance_usage_percentage_min, balance_usage_percentage_max) / 100.0
+        position_size_usd = free_collateral * balance_usage_percent
+        print(f"Аккаунт {account_data['address']}: Free collateral = {free_collateral}, Размер позиции (USD) = {position_size_usd:.2f}")
 
         order_side = account_data['order_side']
         order_size = str(int(position_size_usd))
@@ -233,38 +243,38 @@ async def trade_cycle(account_data, config, paradex_config):
         print(f"Аккаунт {account_data['address']} - параметры ордера до подписи: {json.dumps(order_params)}")
         order_response = await place_order(session, jwt_token, order_params, account_data['private_key'], account_data['proxy'], paradex_config, account_data)
         if order_response:
-            print(f"Аккаунт {account_data['address']}: Ордер размещён ({order_side}). Ответ: {order_response}")
+            print(f"Аккаунт {account_data['address']} разместил {order_side} ордер. Ответ: {order_response}")
         else:
-            print(f"Аккаунт {account_data['address']}: Не удалось разместить ордер ({order_side}).")
+            print(f"Аккаунт {account_data['address']} НЕ смог разместить {order_side} ордер. Ошибка.")
 
         if order_side in ["BUY", "SELL", "SHORT_HALF"]:
-            delay_buy_sell_min, delay_buy_sell_max = config['delay_between_buy_sell_seconds']
-            delay_buy_sell = random.uniform(delay_buy_sell_min, delay_buy_sell_max)
-            print(f"Аккаунт {account_data['address']}: Ждём {delay_buy_sell:.2f} секунд после ордера...")
-            await asyncio.sleep(delay_buy_sell)
+            delay_buy_sell_seconds_min, delay_buy_sell_seconds_max = config['delay_between_buy_sell_seconds']
+            delay_buy_sell_seconds = random.uniform(delay_buy_sell_seconds_min, delay_buy_sell_seconds_max)
+            print(f"Аккаунт {account_data['address']}: Ждем {delay_buy_sell_seconds:.2f} секунд после {order_side} ордера...")
+            await asyncio.sleep(delay_buy_sell_seconds)
 
-        delay_trades_min, delay_trades_max = config['delay_between_trades_seconds']
-        delay_trades = random.uniform(delay_trades_min, delay_trades_max)
-        print(f"Аккаунт {account_data['address']}: Ждём {delay_trades:.2f} секунд перед закрытием позиций...")
-        await asyncio.sleep(delay_trades)
+        delay_seconds_min, delay_seconds_max = config['delay_between_trades_seconds']
+        delay_seconds = random.uniform(delay_seconds_min, delay_seconds_max)
+        print(f"Аккаунт {account_data['address']}: Ждем {delay_seconds:.2f} секунд перед закрытием позиций...")
+        await asyncio.sleep(delay_seconds)
 
         open_positions = await get_open_positions(session, jwt_token, account_data['proxy'])
         if open_positions:
             closed_orders = await close_positions(session, jwt_token, config['trading_pair'], open_positions, account_data['private_key'], account_data['proxy'], paradex_config, config, account_data)
             print(f"Аккаунт {account_data['address']}: Закрыто {len(closed_orders)} позиций. Ответы: {closed_orders}")
         else:
-            print(f"Аккаунт {account_data['address']}: Не удалось получить список открытых позиций.")
+            print(f"Аккаунт {account_data['address']}: Не удалось получить список открытых позиций для закрытия.")
 
-        delay_cycles_min, delay_cycles_max = config['delay_between_cycles_seconds']
-        delay_cycles = random.uniform(delay_cycles_min, delay_cycles_max)
-        print(f"Аккаунт {account_data['address']}: Ждём {delay_cycles:.2f} секунд перед следующим циклом...")
-        await asyncio.sleep(delay_cycles)
+        cycle_delay_seconds_min, cycle_delay_seconds_max = config['delay_between_cycles_seconds']
+        cycle_delay_seconds = random.uniform(cycle_delay_seconds_min, cycle_delay_seconds_max)
+        print(f"Аккаунт {account_data['address']}: Ждем {cycle_delay_seconds:.2f} секунд перед следующим циклом...")
+        await asyncio.sleep(cycle_delay_seconds)
 
     except Exception as e:
-        print(f"Ошибка в торговом цикле для аккаунта {account_data['address']}: {e}")
+        print(f"!!! Общая ошибка в торговом цикле для аккаунта {account_data['address']}: {e}")
     finally:
         await session.close()
-        print(f"Торговый цикл для аккаунта {account_data['address']} завершён.\n")
+        print(f"Торговый цикл для аккаунта {account_data['address']} завершен.\n")
 
 async def get_paradex_config(paradex_http_url):
     url = paradex_http_url + '/system/config'
@@ -273,8 +283,11 @@ async def get_paradex_config(paradex_http_url):
             print(f"Запрос config, статус ответа: {response.status}")
             try:
                 response.raise_for_status()
+            except aiohttp.ClientResponseError as e:
+                print(f"Ошибка при загрузке paradex_config: HTTP статус {response.status}, текст ошибки: {e}")
+                return None
             except Exception as e:
-                print(f"Ошибка загрузки paradex_config: {e}")
+                print(f"Непредвиденная ошибка при загрузке paradex_config: {e}")
                 return None
             return await response.json()
 
@@ -285,50 +298,53 @@ async def main():
 
     wallets = load_wallets()
     if not wallets:
-        print("Ошибка: wallets.json не загружен или пуст.")
+        print("Ошибка: Файл wallets.json не загружен или пуст.")
         return
 
     proxies = load_proxies()
     if not proxies:
-        print("Ошибка: proxies.txt не загружен или пуст, бот остановлен.")
+        print("Ошибка: Файл proxies.txt не загружен или пуст, работа БЕЗ ПРОКСИ невозможна. Бот остановлен.")
         return
 
     user_agents = load_user_agents()
     if not user_agents:
-        print("Предупреждение: user_agents.txt не загружен или пуст, будет использован User-Agent по умолчанию.")
+        print("Предупреждение: Файл user_agents.txt не загружен или пуст. Будет использоваться User-Agent по умолчанию.")
 
     if len(wallets) < 2:
-        print("Ошибка: для стратегии нужно минимум 2 аккаунта, бот остановлен.")
+        print("Ошибка: Для работы стратегии необходимо минимум 2 аккаунта. Бот остановлен.")
         return
 
     if len(wallets) != len(proxies):
-        print(f"Ошибка: количество кошельков ({len(wallets)}) не соответствует количеству прокси ({len(proxies)}), бот остановлен.")
+        print(f"Ошибка: Количество кошельков ({len(wallets)}) не соответствует количеству прокси ({len(proxies)}). Бот остановлен.")
         return
 
     paradex_config = await get_paradex_config("https://api.testnet.paradex.trade/v1")
     if not paradex_config:
-        print("Ошибка: не удалось загрузить конфигурацию Paradex.")
+        print("Не удалось загрузить конфигурацию Paradex.")
         return
 
     account_data_list = []
     num_user_agents = len(user_agents)
-    for i, wallet in enumerate(wallets):
+    for i in range(len(wallets)):
+        wallet = wallets[i]
+        proxy = proxies[i]
+        user_agent = user_agents[i % num_user_agents] if user_agents else None
         account_data = {
-            "address": wallet["address"],
-            "private_key": wallet["private_key"],
-            "proxy": proxies[i],
-            "user_agent": user_agents[i % num_user_agents] if user_agents else None,
-            "account_index": i,
-            "order_side": None
+            'address': wallet['address'],
+            'private_key': wallet['private_key'],
+            'proxy': proxy,
+            'user_agent': user_agent,
+            'account_index': i,
+            'order_side': None
         }
         account_data_list.append(account_data)
 
-    cycles_min, cycles_max = config["cycles_per_account"]
-    cycles = random.randint(cycles_min, cycles_max)
-    print(f"Бот будет работать {cycles} циклов на аккаунт.")
+    cycles_per_account_min, cycles_per_account_max = config['cycles_per_account']
+    cycles_per_account = random.randint(cycles_per_account_min, cycles_per_account_max)
+    print(f"Бот будет работать {cycles_per_account} циклов на аккаунт.")
 
-    delay_groups_min, delay_groups_max = config["delay_between_groups_seconds"]
-    for cycle_number in range(cycles):
+    delay_between_groups_seconds_min, delay_between_groups_seconds_max = config['delay_between_groups_seconds']
+    for cycle_number in range(cycles_per_account):
         print(f"\n--- Начало цикла #{cycle_number + 1} ---")
         random.shuffle(account_data_list)
         account_groups = []
@@ -344,12 +360,12 @@ async def main():
             num_pairs += 1
         print(f"Формируем {num_triplets} групп по 3 аккаунта и {num_pairs} групп по 2 аккаунта.")
         for _ in range(num_triplets):
-            group = account_data_list[account_index:account_index+3]
+            group = account_data_list[account_index:account_index + 3]
             account_groups.append(group)
             account_index += 3
             print(f"  Группа размера: {len(group)}")
         for _ in range(num_pairs):
-            group = account_data_list[account_index:account_index+2]
+            group = account_data_list[account_index:account_index + 2]
             account_groups.append(group)
             account_index += 2
             print(f"  Группа размера: {len(group)}")
@@ -357,21 +373,25 @@ async def main():
         for group_index, group in enumerate(account_groups):
             print(f"\n-- Обработка группы #{group_index + 1} (размер: {len(group)}) --")
             if len(group) == 2:
-                group[0]["order_side"] = "BUY"
-                group[1]["order_side"] = "SELL"
+                group[0]['order_side'] = "BUY"
+                group[1]['order_side'] = "SELL"
             elif len(group) == 3:
-                group[0]["order_side"] = "BUY"
-                group[1]["order_side"] = "SELL"
-                group[2]["order_side"] = "SHORT_HALF"
+                group[0]['order_side'] = "BUY"
+                group[1]['order_side'] = "SELL"
+                group[2]['order_side'] = "SHORT_HALF"
             else:
                 print("Ошибка: Некорректный размер группы!")
                 continue
-            tasks = [trade_cycle(acc, config, paradex_config) for acc in group if acc["order_side"]]
+            tasks = []
+            for account_data in group:
+                if account_data['order_side'] is not None:
+                    tasks.append(trade_cycle(account_data, config, paradex_config))
             await asyncio.gather(*tasks)
-            delay_groups = random.uniform(delay_groups_min, delay_groups_max)
-            print(f"Ждём {delay_groups:.2f} секунд перед следующей группой...")
-            await asyncio.sleep(delay_groups)
-        print(f"\n--- Цикл #{cycle_number + 1} завершён для всех групп. ---\n")
+            print(f"-- Группа #{group_index + 1} отработана. Завершение обработки группы. --")
+            delay_between_groups_seconds = random.uniform(delay_between_groups_seconds_min, delay_between_groups_seconds_max)
+            print(f"Ждем {delay_between_groups_seconds:.2f} секунд перед началом обработки следующей группы...")
+            await asyncio.sleep(delay_between_groups_seconds)
+        print(f"\n--- Цикл #{cycle_number + 1} завершен для всех групп. ---\n")
     print("Все торговые циклы завершены.")
 
 if __name__ == "__main__":
