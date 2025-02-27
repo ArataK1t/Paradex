@@ -65,7 +65,7 @@ def flatten_signature(sig: list[str]) -> str: # <----  Убедитесь, чт�
 def generate_starknet_order_signature(order_params: dict, private_key_hex: str, paradex_config: dict, account_address: str) -> str:
     chain_id = int_from_bytes(paradex_config["starknet_chain_id"].encode())
     
-    # Формируем message для подписи. Если order type является MARKET (или аналогичным), поле price исключается.
+    # Формируем сообщение для подписи. Если order type является MARKET (или аналогичным), поле price исключается.
     order_message = {
         "timestamp": str(order_params['signature_timestamp']),
         "market": order_params['market'],
@@ -76,7 +76,7 @@ def generate_starknet_order_signature(order_params: dict, private_key_hex: str, 
     if order_params['type'] not in ("MARKET", "STOP_MARKET", "STOP_LOSS_MARKET", "TAKE_PROFIT_MARKET"):
         order_message["price"] = str(int(float(order_params.get('price', 0))))
     
-    # Определяем поля типа Order – аналогично исключаем price для MARKET-ордеров.
+    # Определяем типы для подписываемых данных – для MARKET ордеров поле price не включается.
     order_fields = [
         {"name": "timestamp", "type": "felt"},
         {"name": "market", "type": "felt"},
@@ -87,8 +87,9 @@ def generate_starknet_order_signature(order_params: dict, private_key_hex: str, 
     if order_params['type'] not in ("MARKET", "STOP_MARKET", "STOP_LOSS_MARKET", "TAKE_PROFIT_MARKET"):
         order_fields.append({"name": "price", "type": "felt"})
     
+    # Важно: представляем chainId как десятичную строку, а не hex, чтобы domain совпадал с ожиданиями сервера.
     order_msg = {
-        "domain": {"name": "Paradex", "chainId": hex(chain_id), "version": "1"},
+        "domain": {"name": "Paradex", "chainId": str(chain_id), "version": "1"},
         "primaryType": "Order",
         "types": {
             "StarkNetDomain": [
@@ -104,7 +105,7 @@ def generate_starknet_order_signature(order_params: dict, private_key_hex: str, 
     print(f"TypedData для ордера (JSON):\n{json.dumps(order_msg, indent=2)}")
     
     typed_data = TypedData.from_dict(order_msg)
-    # Теперь используем account_address (преобразованный в int), а не 0, для вычисления хеша
+    # Используем значение account_address (преобразованное в int) для вычисления хеша
     msg_hash = typed_data.message_hash(int(account_address, 16))
     print(f"Message Hash для ордера: {msg_hash}")
     
