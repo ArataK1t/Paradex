@@ -136,6 +136,26 @@ async def get_account_info(session, jwt_token, proxy):
             logging.error(f"Непредвиденная ошибка при получении информации об аккаунте: {e}. Повторная попытка через {retry_delay_seconds} секунд...")
         await asyncio.sleep(retry_delay_seconds)
 
+async def get_account_info_details(session, jwt_token, proxy): # <--- Новая функция
+    """Получает детальную информацию об аккаунте с помощью /account/info."""
+    api_url = "https://api.testnet.paradex.trade/v1/account/info" # <--- Исправленный endpoint
+    headers = {
+        'Accept': 'application/json',
+        'Authorization': f'Bearer {jwt_token}'
+    }
+    retry_delay_seconds = 5
+    while True:
+        try:
+            async with session.get(api_url, headers=headers, proxy=proxy) as response:
+                response.raise_for_status()
+                return await response.json()
+        except aiohttp.ClientError as e:
+            logging.error(f"Ошибка получения детальной информации об аккаунте: {e}. Повторная попытка через {retry_delay_seconds} секунд...")
+        except Exception as e:
+            logging.error(f"Непредвиденная ошибка при получении детальной информации об аккаунте: {e}. Повторная попытка через {retry_delay_seconds} секунд...")
+        await asyncio.sleep(retry_delay_seconds)
+
+
 async def place_order(session, jwt_token, order_params, private_key, proxy, paradex_config, account_data):
     """Размещает ордер с повторными попытками."""
     api_url = "https://api.testnet.paradex.trade/v1/orders"
@@ -225,10 +245,6 @@ async def trade_cycle(account_data, config, paradex_config):
             logging.warning(f"Пропускаем аккаунт {account_data['address']} из-за ошибки аутентификации.")
             return
         account_info = await get_account_info(session, jwt_token, account_data['proxy'])
-        logging.info(f"Аккаунт {account_data['account_index']}: Информация об аккаунте после попытки размещения ордера:")
-        logging.info(f"  Free collateral = {account_info.get('free_collateral')}")
-        logging.info(f"  Position size (USD) = {account_info.get('position_value')}")
-        logging.info(f"  Equity = {account_info.get('equity')}")
         if not account_info:
             logging.warning(f"Пропускаем аккаунт {account_data['address']} из-за ошибки получения информации об аккаунте.")
             return
@@ -239,6 +255,14 @@ async def trade_cycle(account_data, config, paradex_config):
         if free_collateral <= 0:
             logging.warning(f"Аккаунт {account_data['address']} имеет недостаточно free collateral ({free_collateral}). Пропускаем.")
             return
+
+        # --- Получение и логгирование детальной информации об аккаунте ---
+        account_info_details = await get_account_info_details(session, jwt_token, account_data['proxy']) # <--- Вызов новой функции
+        if account_info_details:
+            logging.info(f"Аккаунт {account_data['address']} - Детальная информация об аккаунте:\n{json.dumps(account_info_details, indent=2)}") # <--- Лог детальной инфо
+        else:
+            logging.warning(f"Не удалось получить детальную информацию об аккаунте {account_data['address']}.")
+
 
         # --- Расчет размера позиции ---
         balance_usage_percentage_min, balance_usage_percentage_max = config['balance_usage_percentage']
