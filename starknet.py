@@ -49,6 +49,30 @@ def flatten_signature(sig: list[str]) -> str:
 
 def generate_starknet_order_signature(order_params: dict, private_key_hex: str, paradex_config: dict, account_address: str) -> str:
     chain_id = int_from_bytes(paradex_config["starknet_chain_id"].encode())
+    
+    # Формируем message для подписи.
+    # Если order type является MARKET (или аналогичным), поле price исключается.
+    order_message = {
+        "timestamp": str(order_params['signature_timestamp']),
+        "market": order_params['market'],
+        "side": order_params['side'],
+        "orderType": order_params['type'],
+        "size": str(int(float(order_params['size'])))
+    }
+    if order_params['type'] not in ("MARKET", "STOP_MARKET", "STOP_LOSS_MARKET", "TAKE_PROFIT_MARKET"):
+        order_message["price"] = str(int(float(order_params.get('price', 0))))
+    
+    # Определяем поля типа Order – аналогично исключаем price для MARKET-ордеров.
+    order_fields = [
+        {"name": "timestamp", "type": "felt"},
+        {"name": "market", "type": "felt"},
+        {"name": "side", "type": "felt"},
+        {"name": "orderType", "type": "felt"},
+        {"name": "size", "type": "felt"}
+    ]
+    if order_params['type'] not in ("MARKET", "STOP_MARKET", "STOP_LOSS_MARKET", "TAKE_PROFIT_MARKET"):
+        order_fields.append({"name": "price", "type": "felt"})
+    
     order_msg = {
         "domain": {"name": "Paradex", "chainId": hex(chain_id), "version": "1"},
         "primaryType": "Order",
@@ -58,29 +82,16 @@ def generate_starknet_order_signature(order_params: dict, private_key_hex: str, 
                 {"name": "chainId", "type": "felt"},
                 {"name": "version", "type": "felt"},
             ],
-            "Order": [
-                {"name": "timestamp", "type": "felt"},
-                {"name": "market", "type": "felt"},
-                {"name": "side", "type": "felt"},
-                {"name": "orderType", "type": "felt"},
-                {"name": "size", "type": "felt"},
-                {"name": "price", "type": "felt"},
-            ],
+            "Order": order_fields
         },
-        "message": {
-            "timestamp": str(order_params['signature_timestamp']),
-            "market": order_params['market'],
-            "side": order_params['side'],
-            "orderType": order_params['type'],
-            "size": str(int(float(order_params['size']))),
-            "price": str(int(float(order_params.get('price', 0))))
-        },
+        "message": order_message,
     }
-    typed_data = TypedData.from_dict(order_msg)
-    # Для вычисления хеша не используем account_address, так как оно не входит в сообщение
-    msg_hash = typed_data.message_hash(0)
     
     print(f"TypedData для ордера (JSON):\n{json.dumps(order_msg, indent=2)}")
+    
+    typed_data = TypedData.from_dict(order_msg)
+    # Используем 0 вместо account_address для вычисления хеша (так как поле не входит в сообщение)
+    msg_hash = typed_data.message_hash(0)
     print(f"Message Hash для ордера: {msg_hash}")
     
     r, s = message_signature(msg_hash, int(private_key_hex, 16))
