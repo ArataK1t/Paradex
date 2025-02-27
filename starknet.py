@@ -8,6 +8,7 @@ import logging
 def message_signature(msg_hash: int, priv_key: int) -> tuple[int, int]:
     import random # Импортируем random здесь, если еще не импортирован
     k = random.randint(1, EC_ORDER - 1) # <---- Генерируем случайное k
+    logging.info(f"message_signature: msg_hash = {msg_hash}") # <---- Лог msg_hash внутри функции
     return rs_sign(private_key=priv_key, msg_hash=msg_hash, k=k) # <---- Передаем k
 
 
@@ -108,7 +109,10 @@ def generate_starknet_order_signature(order_params: dict, private_key_hex: str, 
 
     logging.info(f"Message Hash для ордера: {msg_hash}") # <---- Лог Message Hash
 
-    r, s = message_signature(msg_hash, int(private_key_hex, 16))
+    priv_key_int = int(private_key_hex, 16) # Явное преобразование в integer
+    logging.info(f"generate_starknet_order_signature: priv_key_int = {priv_key_int}") # <---- Лог priv_key_int
+
+    r, s = message_signature(msg_hash, priv_key_int)
     logging.info(f"Подпись (r, s) перед flatten: r={r}, s={s}") # <---- Лог r и s
 
     sig = [str(r), str(s)]
