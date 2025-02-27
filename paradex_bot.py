@@ -256,6 +256,8 @@ async def trade_cycle(account_data, config, paradex_config):
             "instruction": "GTC",
         }
 
+        logging.info(f"Аккаунт {account_data['account_index']}: Используемый приватный ключ (последние 5 символов): {account_data['private_key'][-5:]}") # <---- Лог приватного ключа
+
         order_response = await place_order(session, jwt_token, order_params, account_data['private_key'], account_data['proxy'], paradex_config, account_data)
         if order_response:
             logging.info(f"Аккаунт {account_data['address']} разместил {order_side} ордер. Ответ: {order_response}")
@@ -306,7 +308,9 @@ async def get_paradex_config(paradex_http_url):
             except Exception as e:
                 logging.error(f"Непредвиденная ошибка при загрузке paradex_config: {e}")
                 return None
-            return await response.json()
+            paradex_config = await response.json()
+            logging.info(f"Paradex Config:\n{json.dumps(paradex_config, indent=2)}") # <---- Лог paradex_config
+            return paradex_config
 
 # --- Основная функция бота ---
 async def main():

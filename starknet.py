@@ -63,12 +63,13 @@ def generate_starknet_auth_signature(account_address: str, timestamp: int, expir
 def flatten_signature(sig: list[str]) -> str: # <----  Убедитесь, что flatten_signature определена где-то в вашем коде!
     return f'["{sig[0]}","{sig[1]}"]'
 
-def generate_starknet_order_signature(order_params: dict, private_key_hex: str, paradex_config: dict, account_address: str) -> str: # account_address added, returning string
+def generate_starknet_order_signature(order_params: dict, private_key_hex: str, paradex_config: dict, account_address: str) -> str:
     """
     Генерирует подпись для ордера согласно документации Paradex.
     ... (описание функции) ...
     """
     chain_id = int_from_bytes(paradex_config["starknet_chain_id"].encode())
+    logging.info(f"generate_starknet_order_signature: chain_id = {chain_id}") # <----  Лог chain_id
 
     order_msg = {
         "domain": {"name": "Paradex", "chainId": hex(chain_id), "version": "1"}, # <----  chainId ОСТАЕТСЯ ИЗ КОНФИГА (проверьте правильность!)
@@ -100,14 +101,16 @@ def generate_starknet_order_signature(order_params: dict, private_key_hex: str, 
         },
     }
 
+    logging.info(f"TypedData для ордера (JSON):\n{json.dumps(order_msg, indent=2)}") # <---- Лог order_msg
     typed_data = TypedData.from_dict(order_msg)
     account_int = int(account_address, 16)
     msg_hash = typed_data.message_hash(account_int)
 
-    logging.info(f"TypedData для ордера (JSON):\n{json.dumps(order_msg, indent=2)}")
-    logging.info(f"Message Hash для ордера: {msg_hash}")
+    logging.info(f"Message Hash для ордера: {msg_hash}") # <---- Лог Message Hash
 
     r, s = message_signature(msg_hash, int(private_key_hex, 16))
+    logging.info(f"Подпись (r, s) перед flatten: r={r}, s={s}") # <---- Лог r и s
+
     sig = [str(r), str(s)]
     signature_str = flatten_signature(sig)
     return signature_str
