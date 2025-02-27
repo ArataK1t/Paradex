@@ -1,16 +1,27 @@
 from starknet_py.common import int_from_bytes
 from starknet_py.utils.typed_data import TypedData
-from starknet_py.constants import EC_ORDER
+from starknet_py.constants import EC_ORDER  # Если такая константа доступна в вашей версии
 from starknet_crypto_py import sign as rs_sign
 import json
-import random
 
 def message_signature(msg_hash: int, priv_key: int) -> tuple[int, int]:
-    k = random.randint(1, EC_ORDER - 1)
-    return rs_sign(private_key=priv_key, msg_hash=msg_hash, k=k)
+    import random # Импортируем random здесь, если еще не импортирован
+    k = random.randint(1, EC_ORDER - 1) # <---- Генерируем случайное k
+    return rs_sign(private_key=priv_key, msg_hash=msg_hash, k=k) # <---- Передаем k
+
 
 def generate_starknet_auth_signature(account_address: str, timestamp: int, expiration: int, private_key_hex: str, paradex_config: dict) -> list[str]:
+    """
+    Генерирует подпись для аутентификации в соответствии с документацией Paradex.
+    Параметры:
+      - account_address: адрес аккаунта в hex-формате
+      - timestamp, expiration: метки времени для сообщения
+      - private_key_hex: приватный ключ (уже выведенный для StarkNet) в hex-формате
+      - paradex_config: конфигурация с параметром "starknet_chain_id"
+    """
     chain_id = int_from_bytes(paradex_config["starknet_chain_id"].encode())
+    
+    # Формирование сообщения (схема как в build_auth_message из доков)
     auth_msg = {
         "message": {
             "method": "POST",
@@ -36,7 +47,10 @@ def generate_starknet_auth_signature(account_address: str, timestamp: int, expir
             ],
         },
     }
+    
+    # Создаём объект TypedData из сообщения
     typed_data = TypedData.from_dict(auth_msg)
+    # Преобразуем адрес аккаунта в int (если передан в виде hex-строки)
     account_int = int(account_address, 16)
     msg_hash = typed_data.message_hash(account_int)
     
@@ -44,14 +58,14 @@ def generate_starknet_auth_signature(account_address: str, timestamp: int, expir
     r, s = message_signature(msg_hash, priv_key)
     return [str(r), str(s)]
 
-def flatten_signature(sig: list[str]) -> str:
+
+def flatten_signature(sig: list[str]) -> str: # <----  Убедитесь, что flatten_signature определена где-то в вашем коде!
     return f'["{sig[0]}","{sig[1]}"]'
 
 def generate_starknet_order_signature(order_params: dict, private_key_hex: str, paradex_config: dict, account_address: str) -> str:
     chain_id = int_from_bytes(paradex_config["starknet_chain_id"].encode())
     
-    # Формируем message для подписи.
-    # Если order type является MARKET (или аналогичным), поле price исключается.
+    # Формируем message для подписи. Если order type является MARKET (или аналогичным), поле price исключается.
     order_message = {
         "timestamp": str(order_params['signature_timestamp']),
         "market": order_params['market'],
@@ -90,8 +104,8 @@ def generate_starknet_order_signature(order_params: dict, private_key_hex: str, 
     print(f"TypedData для ордера (JSON):\n{json.dumps(order_msg, indent=2)}")
     
     typed_data = TypedData.from_dict(order_msg)
-    # Используем 0 вместо account_address для вычисления хеша (так как поле не входит в сообщение)
-    msg_hash = typed_data.message_hash(0)
+    # Теперь используем account_address (преобразованный в int), а не 0, для вычисления хеша
+    msg_hash = typed_data.message_hash(int(account_address, 16))
     print(f"Message Hash для ордера: {msg_hash}")
     
     r, s = message_signature(msg_hash, int(private_key_hex, 16))
