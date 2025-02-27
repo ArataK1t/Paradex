@@ -109,4 +109,4 @@ def generate_starknet_order_signature(order_params: dict, private_key_hex: str, 
     r, s = message_signature(msg_hash, int(private_key_hex, 16)) # <----  ПОЛУЧАЕМ r, s КАК КОРТЕЖ
     sig = [str(r), str(s)] # <----  СОЗДАЕМ СПИСОК [r, s] из СТРОК
     signature_str = flatten_signature(sig) # <----  ИСПОЛЬЗУЕМ flatten_signature ДЛЯ ФОРМАТИРОВАНИЯ В JSON-СТРОКУ
-    return signature_str # <---- ВОЗВРАЩАЕМ ПОДПИСЬ КАК JSON-СТРОКУ
+    return signature_str # <---- ВОЗВРАЩАЕМ ПОДПИСЬ КАК JSON-СТРОКУ 

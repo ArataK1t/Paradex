@@ -5,14 +5,18 @@ import json
 import time
 import random
 
+# --- Импорт функций StarkNet подписи из файла (см. ниже) ---
 from starknet import generate_starknet_auth_signature, generate_starknet_order_signature
 
+# --- Конфигурация и Данные ---
 CONFIG_FILE = "config.json"
 WALLET_FILE = "wallets.json"
 PROXY_FILE = "proxies.txt"
-USER_AGENT_FILE = "user_agents.txt"
+USER_AGENT_FILE = "user_agents.txt"  # Файл с User-Agent
 
+# --- Загрузка данных из файлов ---
 def load_config():
+    """Загружает конфигурацию из JSON файла."""
     try:
         with open(CONFIG_FILE, 'r') as f:
             config = json.load(f)
@@ -39,6 +43,7 @@ def load_config():
         return None
 
 def load_wallets():
+    """Загружает данные кошельков из JSON файла."""
     try:
         with open(WALLET_FILE, 'r') as f:
             return json.load(f)
@@ -47,6 +52,7 @@ def load_wallets():
         return None
 
 def load_proxies():
+    """Загружает прокси из текстового файла."""
     try:
         with open(PROXY_FILE, 'r') as f:
             proxies = [line.strip() for line in f if line.strip()]
@@ -56,6 +62,7 @@ def load_proxies():
         return []
 
 def load_user_agents():
+    """Загружает User-Agent из текстового файла."""
     try:
         with open(USER_AGENT_FILE, 'r') as f:
             user_agents = [line.strip() for line in f if line.strip()]
@@ -64,6 +71,7 @@ def load_user_agents():
         print(f"Ошибка: Файл User-Agent '{USER_AGENT_FILE}' не найден.")
         return []
 
+# --- Асинхронные функции для API Paradex (с повторными попытками) ---
 async def get_jwt_token(session, account_data, paradex_config):
     api_url = "https://api.testnet.paradex.trade/v1/auth"
     current_time = int(time.time())
@@ -74,6 +82,7 @@ async def get_jwt_token(session, account_data, paradex_config):
         'PARADEX-TIMESTAMP': str(current_time),
         'PARADEX-SIGNATURE-EXPIRATION': str(expiration_time)
     }
+    # Получаем подпись как список
     signature_parts = generate_starknet_auth_signature(
         account_data['address'],
         current_time,
@@ -81,6 +90,7 @@ async def get_jwt_token(session, account_data, paradex_config):
         account_data['private_key'],
         paradex_config
     )
+    # Преобразуем список в корректную JSON-строку
     headers['PARADEX-STARKNET-SIGNATURE'] = json.dumps(signature_parts)
     
     retry_delay_seconds = 5
@@ -106,6 +116,7 @@ async def get_jwt_token(session, account_data, paradex_config):
         await asyncio.sleep(retry_delay_seconds)
 
 async def get_account_info(session, jwt_token, proxy):
+    """Получает информацию об аккаунте с повторными попытками."""
     api_url = "https://api.testnet.paradex.trade/v1/account"
     headers = {
         'Accept': 'application/json',
@@ -124,44 +135,37 @@ async def get_account_info(session, jwt_token, proxy):
         await asyncio.sleep(retry_delay_seconds)
 
 async def place_order(session, jwt_token, order_params, private_key, proxy, paradex_config, account_data):
+    """Размещает ордер с повторными попытками."""
     api_url = "https://api.testnet.paradex.trade/v1/orders"
     headers = {
         'Content-Type': 'application/json',
         'Accept': 'application/json',
         'Authorization': f'Bearer {jwt_token}'
     }
-    # Используем миллисекунды для timestamp
-    order_params['signature_timestamp'] = int(time.time() * 1000)
-    if 'stp' not in order_params:
-        order_params['stp'] = "EXPIRE_TAKER"
-    print(f"Исходные параметры ордера до подписи: {json.dumps(order_params)}")
-    # Генерация подписи; передаём account_data['address'] для логирования (но не используем в хеше)
-    order_params['signature'] = generate_starknet_order_signature(order_params, private_key, paradex_config, account_data['address'])
-    
-    # Формируем payload согласно документации: если тип MARKET, поле price нужно исключить.
-    order_params_to_send = { key: order_params[key] for key in order_params if key not in ('leverage', 'account_address') }
-    if order_params_to_send.get("type") in ("MARKET", "STOP_MARKET", "STOP_LOSS_MARKET", "TAKE_PROFIT_MARKET"):
-        order_params_to_send.pop("price", None)
-    print(f"Параметры ордера перед отправкой (JSON): {json.dumps(order_params_to_send)}")
-    
+    order_params['signature_timestamp'] = int(time.time())
+    order_params['account_address'] = account_data['address']
+    order_params['signature'] = generate_starknet_order_signature(order_params, private_key, paradex_config)
+
+    #  Удаляем лишние параметры 'leverage' и 'account_address' из order_params ПЕРЕД отправкой
+    order_params_to_send = {
+        key: order_params[key] for key in order_params if key not in ('leverage', 'account_address')
+    }
+    print(f"Параметры ордера перед отправкой (JSON): {json.dumps(order_params_to_send)}") # Лог отправляемых параметров
+
     retry_delay_seconds = 5
     while True:
         try:
-            async with session.post(api_url, headers=headers, json=order_params_to_send, proxy=proxy) as response:
-                response_text = await response.text()
-                if response.status in (200, 201):
-                    print(f"Ордер успешно создан. Статус: {response.status}. Ответ: {response_text}")
-                    return await response.json()
-                else:
-                    print(f"Ошибка размещения ордера: статус {response.status}. Ответ: {response_text}. Параметры: {order_params_to_send}")
-                    response.raise_for_status()
+            async with session.post(api_url, headers=headers, json=order_params_to_send, proxy=proxy) as response: # <---- Отправляем order_params_to_send
+                response.raise_for_status()
+                return await response.json()
         except aiohttp.ClientError as e:
-            print(f"Ошибка размещения ордера: {e}, Параметры: {order_params_to_send}. Повторная попытка через {retry_delay_seconds} секунд...")
+            print(f"Ошибка размещения ордера: {e}, Параметры: {order_params_to_send}. Повторная попытка через {retry_delay_seconds} секунд...") # Лог с order_params_to_send
         except Exception as e:
-            print(f"Непредвиденная ошибка при размещении ордера: {e}. Параметры: {order_params_to_send}. Повторная попытка через {retry_delay_seconds} секунд...")
+            print(f"Непредвиденная ошибка при размещении ордера: {e}. Параметры: {order_params_to_send}. Повторная попытка через {retry_delay_seconds} секунд...") # Лог с order_params_to_send
         await asyncio.sleep(retry_delay_seconds)
 
 async def get_open_positions(session, jwt_token, proxy):
+    """Получает список открытых позиций с повторными попытками."""
     api_url = "https://api.testnet.paradex.trade/v1/positions"
     headers = {
         'Accept': 'application/json',
@@ -179,7 +183,8 @@ async def get_open_positions(session, jwt_token, proxy):
             print(f"Непредвиденная ошибка при получении открытых позиций: {e}. Повторная попытка через {retry_delay_seconds} секунд...")
         await asyncio.sleep(retry_delay_seconds)
 
-async def close_positions(session, jwt_token, market, positions, private_key, proxy, paradex_config, config, account_data):
+async def close_positions(session, jwt_token, market, positions, private_key, proxy, paradex_config, config):
+    """Закрывает открытые позиции на рынке с повторными попытками."""
     closed_orders = []
     for position in positions.get('results', []):
         if position['market'] == market:
@@ -190,16 +195,18 @@ async def close_positions(session, jwt_token, market, positions, private_key, pr
                 "type": "MARKET",
                 "size": position['size'],
                 "instruction": "GTC",
-                "stp": "EXPIRE_TAKER"
+                "leverage": config['leverage']
             }
-            order_response = await place_order(session, jwt_token, close_order_params, private_key, proxy, paradex_config, account_data)
+            order_response = await place_order(session, jwt_token, close_order_params, private_key, proxy, paradex_config, config)
             if order_response:
                 closed_orders.append(order_response)
             else:
                 print(f"Не удалось разместить ордер на закрытие позиции: {position}")
     return closed_orders
 
+# --- Основная логика работы бота ---
 async def trade_cycle(account_data, config, paradex_config):
+    """Торговый цикл для одного аккаунта."""
     print(f"Начинаем торговый цикл для аккаунта: {account_data['address']}")
     default_headers = {
         'User-Agent': account_data['user_agent'] if account_data['user_agent'] else 'ParadexBot-Default-UA'
@@ -222,11 +229,13 @@ async def trade_cycle(account_data, config, paradex_config):
             print(f"Аккаунт {account_data['address']} имеет недостаточно free collateral ({free_collateral}). Пропускаем.")
             return
 
+        # --- Расчет размера позиции ---
         balance_usage_percentage_min, balance_usage_percentage_max = config['balance_usage_percentage']
         balance_usage_percent = random.uniform(balance_usage_percentage_min, balance_usage_percentage_max) / 100.0
         position_size_usd = free_collateral * balance_usage_percent
         print(f"Аккаунт {account_data['address']}: Free collateral = {free_collateral}, Размер позиции (USD) = {position_size_usd:.2f}")
 
+        # --- Размещение ордеров (Лонг/Шорт) ---
         order_side = account_data['order_side']
         order_size = str(int(position_size_usd))
         if order_side == "SHORT_HALF":
@@ -238,15 +247,24 @@ async def trade_cycle(account_data, config, paradex_config):
             "type": "MARKET",
             "size": order_size,
             "instruction": "GTC",
-            "stp": "EXPIRE_TAKER"
+            "price": "0"
+            #"leverage": config['leverage']
         }
-        print(f"Аккаунт {account_data['address']} - параметры ордера до подписи: {json.dumps(order_params)}")
+        order_params['account_address'] = account_data['address']
+        order_params['signature_timestamp'] = int(time.time())
+        order_params['signature'] = generate_starknet_order_signature(
+            order_params, account_data['private_key'], paradex_config
+        )
+
+        print(f"Параметры ордера перед отправкой (JSON): {json.dumps(order_params)}") # Для отладки
+
         order_response = await place_order(session, jwt_token, order_params, account_data['private_key'], account_data['proxy'], paradex_config, account_data)
         if order_response:
             print(f"Аккаунт {account_data['address']} разместил {order_side} ордер. Ответ: {order_response}")
         else:
             print(f"Аккаунт {account_data['address']} НЕ смог разместить {order_side} ордер. Ошибка.")
 
+        # --- Задержка между операциями ---
         if order_side in ["BUY", "SELL", "SHORT_HALF"]:
             delay_buy_sell_seconds_min, delay_buy_sell_seconds_max = config['delay_between_buy_sell_seconds']
             delay_buy_sell_seconds = random.uniform(delay_buy_sell_seconds_min, delay_buy_sell_seconds_max)
@@ -260,7 +278,7 @@ async def trade_cycle(account_data, config, paradex_config):
 
         open_positions = await get_open_positions(session, jwt_token, account_data['proxy'])
         if open_positions:
-            closed_orders = await close_positions(session, jwt_token, config['trading_pair'], open_positions, account_data['private_key'], account_data['proxy'], paradex_config, config, account_data)
+            closed_orders = await close_positions(session, jwt_token, config['trading_pair'], open_positions, account_data['private_key'], account_data['proxy'], paradex_config, config)
             print(f"Аккаунт {account_data['address']}: Закрыто {len(closed_orders)} позиций. Ответы: {closed_orders}")
         else:
             print(f"Аккаунт {account_data['address']}: Не удалось получить список открытых позиций для закрытия.")
@@ -277,6 +295,7 @@ async def trade_cycle(account_data, config, paradex_config):
         print(f"Торговый цикл для аккаунта {account_data['address']} завершен.\n")
 
 async def get_paradex_config(paradex_http_url):
+    """Загружает конфигурацию Paradex API."""
     url = paradex_http_url + '/system/config'
     async with aiohttp.ClientSession() as session:
         async with session.get(url) as response:
@@ -291,6 +310,7 @@ async def get_paradex_config(paradex_http_url):
                 return None
             return await response.json()
 
+# --- Основная функция бота ---
 async def main():
     config = load_config()
     if not config:
@@ -323,6 +343,7 @@ async def main():
         print("Не удалось загрузить конфигурацию Paradex.")
         return
 
+    # Связывание кошельков, прокси и User-Agent (1 к 1)
     account_data_list = []
     num_user_agents = len(user_agents)
     for i in range(len(wallets)):
