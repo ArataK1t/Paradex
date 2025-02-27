@@ -225,6 +225,10 @@ async def trade_cycle(account_data, config, paradex_config):
             logging.warning(f"Пропускаем аккаунт {account_data['address']} из-за ошибки аутентификации.")
             return
         account_info = await get_account_info(session, jwt_token, account_data['proxy'])
+        logging.info(f"Аккаунт {account_data['account_index']}: Информация об аккаунте после попытки размещения ордера:")
+        logging.info(f"  Free collateral = {account_info.get('free_collateral')}")
+        logging.info(f"  Position size (USD) = {account_info.get('position_value')}")
+        logging.info(f"  Equity = {account_info.get('equity')}")
         if not account_info:
             logging.warning(f"Пропускаем аккаунт {account_data['address']} из-за ошибки получения информации об аккаунте.")
             return
