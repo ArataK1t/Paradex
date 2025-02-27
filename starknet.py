@@ -62,21 +62,41 @@ def generate_starknet_auth_signature(account_address: str, timestamp: int, expir
 def flatten_signature(sig: list[str]) -> str: # <----  Убедитесь, что flatten_signature определена где-то в вашем коде!
     return f'["{sig[0]}","{sig[1]}"]'
 
+def encode_str_to_felt(text: str) -> int:
+    """Преобразует короткую строку в число (felt)."""
+    result = 0
+    for c in text:
+        result = result * 256 + ord(c)
+    return result
+
 def generate_starknet_order_signature(order_params: dict, private_key_hex: str, paradex_config: dict, account_address: str) -> str:
     chain_id = int_from_bytes(paradex_config["starknet_chain_id"].encode())
     
-    # Формируем сообщение для подписи. Если order type является MARKET (или аналогичным), поле price исключается.
+    # Преобразуем строковые поля в felt
+    market_felt = encode_str_to_felt(order_params['market'])
+    side_felt = encode_str_to_felt(order_params['side'])
+    order_type_felt = encode_str_to_felt(order_params['type'])
+    
+    # Формируем сообщение для подписи.
+    # Для MARKET ордеров поле price исключается.
     order_message = {
-        "timestamp": str(order_params['signature_timestamp']),
-        "market": order_params['market'],
-        "side": order_params['side'],
-        "orderType": order_params['type'],
-        "size": str(int(float(order_params['size'])))
+        "timestamp": order_params['signature_timestamp'],  # число (в миллисекундах)
+        "market": market_felt,
+        "side": side_felt,
+        "orderType": order_type_felt,
+        "size": int(float(order_params['size']))
     }
     if order_params['type'] not in ("MARKET", "STOP_MARKET", "STOP_LOSS_MARKET", "TAKE_PROFIT_MARKET"):
-        order_message["price"] = str(int(float(order_params.get('price', 0))))
+        order_message["price"] = int(float(order_params.get('price', 0)))
     
-    # Определяем типы для подписываемых данных – для MARKET ордеров поле price не включается.
+    # Формируем домен. Важно также преобразовать строковые поля домена в felt.
+    domain = {
+        "name": encode_str_to_felt("Paradex"),
+        "chainId": chain_id,  # уже число
+        "version": encode_str_to_felt("1")
+    }
+    
+    # Определяем тип Order – для MARKET ордеров поле price не включается.
     order_fields = [
         {"name": "timestamp", "type": "felt"},
         {"name": "market", "type": "felt"},
@@ -87,15 +107,14 @@ def generate_starknet_order_signature(order_params: dict, private_key_hex: str, 
     if order_params['type'] not in ("MARKET", "STOP_MARKET", "STOP_LOSS_MARKET", "TAKE_PROFIT_MARKET"):
         order_fields.append({"name": "price", "type": "felt"})
     
-    # Важно: представляем chainId как десятичную строку, а не hex, чтобы domain совпадал с ожиданиями сервера.
     order_msg = {
-        "domain": {"name": "Paradex", "chainId": str(chain_id), "version": "1"},
+        "domain": domain,
         "primaryType": "Order",
         "types": {
             "StarkNetDomain": [
                 {"name": "name", "type": "felt"},
                 {"name": "chainId", "type": "felt"},
-                {"name": "version", "type": "felt"},
+                {"name": "version", "type": "felt"}
             ],
             "Order": order_fields
         },
@@ -105,7 +124,7 @@ def generate_starknet_order_signature(order_params: dict, private_key_hex: str, 
     print(f"TypedData для ордера (JSON):\n{json.dumps(order_msg, indent=2)}")
     
     typed_data = TypedData.from_dict(order_msg)
-    # Используем значение account_address (преобразованное в int) для вычисления хеша
+    # Используем account_address (преобразованный в int) для вычисления хеша
     msg_hash = typed_data.message_hash(int(account_address, 16))
     print(f"Message Hash для ордера: {msg_hash}")
     
